@@ -107,8 +107,8 @@ add_executable(protoc-gen-krpc protoc-gen-krpc.cc
   # somehow.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../common/global-flags.cc)
 # IMPALA-8642: kudu_version.cc depends on gen-cpp/Status_types.h in target thrift-deps
-add_dependencies(protoc-gen-krpc thrift-deps)
-target_link_libraries(protoc-gen-krpc gutil glog gflags protoc protobuf rpc_header_proto ${KUDU_BASE_LIBS})
+add_dependencies(protoc-gen-krpc thrift-deps ImpalaThrift)
+target_link_libraries(protoc-gen-krpc gutil glog gflags protoc protobuf rpc_header_proto ImpalaThrift ${KUDU_BASE_LIBS})
 
 #### RPC test
 PROTOBUF_GENERATE_CPP(

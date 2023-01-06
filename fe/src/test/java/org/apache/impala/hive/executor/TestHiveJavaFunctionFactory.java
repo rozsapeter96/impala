@@ -33,23 +33,27 @@ public class TestHiveJavaFunctionFactory implements HiveJavaFunctionFactory {
       return new ArrayList<>();
     }
 
+    @Override
+    public List<ScalarFunction> extract(HiveLegacyFunctionExtractor extractor)
+        throws CatalogException {
+      return new ArrayList<>();
+    }
+
     public Function getHiveFunction() {
       return null;
     }
   }
 
-  public HiveJavaFunction create(String localLibPath, Function hiveFn,
-      Type retType, Type[] paramTypes) throws CatalogException {
-    return new TestHiveJavaFunction();
-  }
-
-  public HiveJavaFunction create(String localLibPath,
-      ScalarFunction fn) throws CatalogException {
-    return new TestHiveJavaFunction();
-  }
-
-  public HiveJavaFunction create(String localLibPath, Function hiveFn)
+  public HiveJavaFunction create(Function hiveFn, Type retType, Type[] paramTypes)
       throws CatalogException {
+    return new TestHiveJavaFunction();
+  }
+
+  public HiveJavaFunction create(ScalarFunction fn) throws CatalogException {
+    return new TestHiveJavaFunction();
+  }
+
+  public HiveJavaFunction create(Function hiveFn) throws CatalogException {
     return new TestHiveJavaFunction();
   }
 }

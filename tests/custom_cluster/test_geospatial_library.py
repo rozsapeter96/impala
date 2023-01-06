@@ -14,11 +14,28 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import pytest
 
-add_custom_target(validate_java_pom_versions ALL
-  COMMAND $ENV{IMPALA_HOME}/bin/validate-java-pom-versions.sh
-)
+from tests.common.custom_cluster_test_suite import CustomClusterTestSuite
 
-add_custom_target(java ALL DEPENDS gen-deps function-registry geospatial-udf-wrappers validate_java_pom_versions
-  COMMAND $ENV{IMPALA_HOME}/bin/mvn-quiet.sh -B install -DskipTests
-)
+ST_POINT_SIGNATURE = "BINARY\tst_point(STRING)\tJAVA\ttrue"
+SHOW_FUNCTIONS = "show functions in _impala_builtins"
+
+
+class TestGeospatialLibrary(CustomClusterTestSuite):
+  """Tests the geospatial_library backend flag"""
+
+  @classmethod
+  def get_workload(cls):
+    return 'functional-query'
+
+  @CustomClusterTestSuite.with_args(start_args='--geospatial_library=NONE')
+  @pytest.mark.execute_serially
+  def test_disabled(self):
+    result = self.execute_query(SHOW_FUNCTIONS)
+    assert ST_POINT_SIGNATURE not in result.data
+
+  @pytest.mark.execute_serially
+  def test_enabled(self):
+    result = self.execute_query(SHOW_FUNCTIONS)
+    assert ST_POINT_SIGNATURE in result.data

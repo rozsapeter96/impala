@@ -25,6 +25,7 @@
 
 #include "common/constant-strings.h"
 #include "common/logging.h"
+#include "gen-cpp/BackendGflags_types.h"
 #include "gutil/strings/substitute.h"
 
 #include "common/names.h"
@@ -374,6 +375,15 @@ DEFINE_bool(pull_table_types_and_comments, false,
     "just contain the table names, but also the table types and comments. This is a "
     "catalogd-only flag. Required if users want GET_TABLES requests return correct table "
     "types or comments.");
+
+static const string geo_lib_none = to_string(impala::TGeospatialLibrary::NONE);
+static const string geo_lib_hive_esri = to_string(impala::TGeospatialLibrary::HIVE_ESRI);
+
+static const string geo_lib_help_msg = "Specifies which implementation of "
+    "geospatial functions should be included as builtins. Possible values: "
+    "[\"" + geo_lib_none + "\", \""  + geo_lib_hive_esri + "\"]";
+
+DEFINE_string(geospatial_library, geo_lib_none, geo_lib_help_msg.c_str());
 
 // ++========================++
 // || Startup flag graveyard ||
