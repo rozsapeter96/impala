@@ -19,6 +19,6 @@ add_custom_target(validate_java_pom_versions ALL
   COMMAND $ENV{IMPALA_HOME}/bin/validate-java-pom-versions.sh
 )
 
-add_custom_target(java ALL DEPENDS gen-deps function-registry validate_java_pom_versions
+add_custom_target(java ALL DEPENDS gen-deps function-registry geospatial-udf-wrappers validate_java_pom_versions
   COMMAND $ENV{IMPALA_HOME}/bin/mvn-quiet.sh -B install -DskipTests
 )

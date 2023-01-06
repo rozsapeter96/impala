@@ -375,6 +375,10 @@ DEFINE_bool(pull_table_types_and_comments, false,
     "catalogd-only flag. Required if users want GET_TABLES requests return correct table "
     "types or comments.");
 
+DEFINE_string(geospatial_library, "NONE",
+    "Specifies which implementation of geospatial functions should be included "
+    "as builtins");
+
 // ++========================++
 // || Startup flag graveyard ||
 // ++========================++

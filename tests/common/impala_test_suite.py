@@ -638,6 +638,7 @@ class ImpalaTestSuite(BaseTestSuite):
         # Create a new client so the session will use the new username.
         target_impalad_client = self.create_impala_client(protocol=protocol)
       query_options_changed = []
+
       try:
         for query in query.split(';'):
           set_pattern_match = SET_PATTERN.match(query)
@@ -648,10 +649,14 @@ class ImpalaTestSuite(BaseTestSuite):
                 "Consider deepcopy()-ing the vector and removing this option in the " \
                 "python test." % set_pattern_match.groups()[0]
           result = self.__execute_query(target_impalad_client, query, user=user)
+          file = open("/tmp/query.txt", "a")
+          file.write(query + "\n")
+          file.close()
       finally:
         if len(query_options_changed) > 0:
           self.__restore_query_options(query_options_changed, target_impalad_client)
       return result
+
 
     def __exec_in_hive(query, user=None):
       """

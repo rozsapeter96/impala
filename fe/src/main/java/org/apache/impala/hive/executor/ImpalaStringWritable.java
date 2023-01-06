@@ -20,6 +20,7 @@ package org.apache.impala.hive.executor;
 import java.nio.ByteBuffer;
 
 import org.apache.impala.util.UnsafeUtil;
+import org.apache.kudu.shaded.io.netty.channel.Channel.Unsafe;
 
 @SuppressWarnings("restriction")
 /**
@@ -77,7 +78,6 @@ public class ImpalaStringWritable {
     // TODO: reuse this array.
     array_ = ByteBuffer.allocate(len);
     byte[] buffer = array_.array();
-
     long srcPtr = UnsafeUtil.UNSAFE.getLong(stringValPtr_);
     UnsafeUtil.Copy(buffer, 0, srcPtr, len);
     return buffer;

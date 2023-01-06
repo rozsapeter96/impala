@@ -422,6 +422,9 @@ class TestUdfExecution(TestUdfBase):
     actual_ndv = len(set(value.split("-")[0] for value in result.data))
     assert actual_ndv == expected_ndv
 
+  def test_esri_geospatial_functions(self, vector):
+    self.run_test_case('QueryTest/udf-esri-geospatial', vector)
+
 
 class TestUdfTargeted(TestUdfBase):
   """Targeted UDF tests that don't need to be run under the full combination of

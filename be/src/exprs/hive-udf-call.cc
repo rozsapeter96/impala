@@ -192,8 +192,11 @@ Status HiveUdfCall::OpenEvaluator(FunctionContext::FunctionStateScope scope,
     // Scoped handle for libCache entry.
     LibCacheEntryHandle handle;
     string local_location;
-    RETURN_IF_ERROR(LibCache::instance()->GetLocalPath(fn_.hdfs_location,
-        LibCache::TYPE_JAR, fn_.last_modified_time, &handle, &local_location));
+    bool builtin_udf = fn_.hdfs_location.empty();
+    if (!builtin_udf) {
+      RETURN_IF_ERROR(LibCache::instance()->GetLocalPath(fn_.hdfs_location,
+          LibCache::TYPE_JAR, fn_.last_modified_time, &handle, &local_location));
+    }
     THiveUdfExecutorCtorParams ctor_params;
     ctor_params.fn = fn_;
     ctor_params.local_location = local_location;

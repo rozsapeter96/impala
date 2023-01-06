@@ -43,6 +43,9 @@ public interface HiveJavaFunction {
    */
   public List<ScalarFunction> extract() throws CatalogException;
 
+  public List<ScalarFunction> extract(HiveLegacyFunctionExtractor extractor)
+      throws CatalogException;
+
   /**
    * Get the Hive "Function" object declared by the Hive metastore API.
    */
@@ -60,5 +63,10 @@ public interface HiveJavaFunction {
         scalarFn.getSymbolName(), "", PrincipalType.USER,
         (int) (System.currentTimeMillis() / 1000),
         FunctionType.JAVA, resources);
+  }
+  public static Function createHiveFunction(
+      String fnName, String dbName, String symbolName, List<ResourceUri> resources) {
+    return new Function(fnName, dbName, symbolName, "", PrincipalType.USER,
+        (int) (System.currentTimeMillis() / 1000), FunctionType.JAVA, resources);
   }
 }

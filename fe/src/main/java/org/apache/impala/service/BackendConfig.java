@@ -29,6 +29,7 @@ import org.apache.impala.thrift.TBackendGflags;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import org.apache.impala.thrift.TGeospatialLibrary;
 
 /**
  * This class is meant to provide the FE with impalad backend configuration parameters,
@@ -375,5 +376,9 @@ public class BackendConfig {
 
   public String getIgnoredDirPrefixList() {
     return backendCfg_.ignored_dir_prefix_list;
+  }
+
+  public TGeospatialLibrary getGeospatialLibrary() {
+    return backendCfg_.geospatial_library;
   }
 }
