@@ -19,6 +19,7 @@ package org.apache.impala.hive.executor;
 
 import java.nio.ByteBuffer;
 
+import java.util.Arrays;
 import org.apache.impala.util.UnsafeUtil;
 
 @SuppressWarnings("restriction")
@@ -33,14 +34,14 @@ import org.apache.impala.util.UnsafeUtil;
  */
 public class ImpalaStringWritable {
   // The length is 8 bytes into the struct.
-  static public final int STRING_VALUE_LEN_OFFSET = 8;
+  public static final int STRING_VALUE_LEN_OFFSET = 8;
 
   // Ptr (to native heap) where the value should be read from and written to.
   // This needs to be ABI compatible with the BE StringValue class
   private final long stringValPtr_;
 
-  // Array object to convert between native and java heap (i.e. byte[]).
-  private ByteBuffer array_;
+  // Array object to store native values
+  private byte[] array_;
 
   // Set if this object had to allocate from the native heap on the java side. If this
   // is set, it will always be stringValPtr_->ptr
@@ -58,8 +59,8 @@ public class ImpalaStringWritable {
   public ImpalaStringWritable(long ptr) {
     stringValPtr_ = ptr;
     bufferPtr_= 0;
-    bufferCapacity_ = getLength();
-    array_ = ByteBuffer.allocate(0);
+    bufferCapacity_ = 0;
+    array_ = new byte[0];
   }
 
   /*
@@ -71,17 +72,24 @@ public class ImpalaStringWritable {
     super.finalize();
   }
 
-  // Returns the underlying bytes as a byte[]
-  public byte[] getBytes() {
+  /*
+   * Initialize array_ from native heap before the object is getting used in 'evaluate'
+   */
+  public void initialize() {
     int len = getLength();
-    // TODO: reuse this array.
-    array_ = ByteBuffer.allocate(len);
-    byte[] buffer = array_.array();
+    bufferCapacity_ = len;
+    array_ = loadFromNativeHeap(len);
+  }
 
+  private byte[] loadFromNativeHeap(int length) {
+    byte[] buffer = new byte[length];
     long srcPtr = UnsafeUtil.UNSAFE.getLong(stringValPtr_);
-    UnsafeUtil.Copy(buffer, 0, srcPtr, len);
+    bufferPtr_ = srcPtr;
+    UnsafeUtil.Copy(buffer, 0, srcPtr, length);
     return buffer;
   }
+
+  public byte[] getBytes() { return array_; }
 
   // Returns the capacity of the underlying array
   public int getCapacity() {
@@ -94,6 +102,7 @@ public class ImpalaStringWritable {
     bufferPtr_ = UnsafeUtil.UNSAFE.reallocateMemory(bufferPtr_, newCap);
     UnsafeUtil.UNSAFE.putLong(stringValPtr_, bufferPtr_);
     bufferCapacity_ = newCap;
+    array_ = Arrays.copyOf(array_, newCap);
   }
 
   // Returns the length of the string
@@ -105,7 +114,7 @@ public class ImpalaStringWritable {
   // the additional bytes are undefined.
   public void setSize(int s) {
     setCapacity(s);
-    UnsafeUtil.UNSAFE.putInt(stringValPtr_ + 8, s);
+    UnsafeUtil.UNSAFE.putInt(stringValPtr_ + STRING_VALUE_LEN_OFFSET, s);
   }
 
   // Sets (v[offset], len) to the underlying buffer, growing it as necessary.
@@ -113,5 +122,6 @@ public class ImpalaStringWritable {
     setSize(len);
     long strPtr = UnsafeUtil.UNSAFE.getLong(stringValPtr_);
     UnsafeUtil.Copy(strPtr, v, offset, len);
+    array_ = loadFromNativeHeap(len);
   }
 }

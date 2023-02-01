@@ -83,9 +83,15 @@ public class HiveUdfExecutorLegacy extends HiveUdfExecutor {
             case LONG_WRITABLE:
             case FLOAT_WRITABLE:
             case DOUBLE_WRITABLE:
+              inputArgs_[i] = inputObjects[i];
+              break;
             case BYTE_ARRAY:
             case BYTES_WRITABLE:
+              ((ImpalaBytesWritable) inputObjects[i]).initialize();
+              inputArgs_[i] = inputObjects[i];
+              break;
             case TEXT:
+              ((ImpalaTextWritable) inputObjects[i]).initialize();
               inputArgs_[i] = inputObjects[i];
               break;
             case BOOLEAN:
@@ -111,8 +117,9 @@ public class HiveUdfExecutorLegacy extends HiveUdfExecutor {
               break;
             case STRING:
               Preconditions.checkState(inputObjects[i] instanceof ImpalaBytesWritable);
-              inputArgs_[i] =
-                  new String(((ImpalaBytesWritable)inputObjects[i]).getBytes());
+              ImpalaBytesWritable bytesWritable = (ImpalaBytesWritable) inputObjects[i];
+              bytesWritable.initialize();
+              inputArgs_[i] = new String(bytesWritable.getBytes());
               break;
           }
         } else {

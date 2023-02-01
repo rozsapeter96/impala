@@ -364,6 +364,7 @@ public class UdfExecutorTest {
             Preconditions.checkState(false);
           }
           ImpalaStringWritable sw = new ImpalaStringWritable(r);
+          sw.initialize();
           if (Arrays.equals(expectedBytes, sw.getBytes())) break;
 
           errMsgs.add("Expected string: " + Bytes.toString(expectedBytes));

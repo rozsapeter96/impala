@@ -30,6 +30,8 @@ public class ImpalaBytesWritable extends BytesWritable {
     string_ = new ImpalaStringWritable(ptr);
   }
 
+  public void initialize() { string_.initialize(); }
+
   @Override
   public byte[] copyBytes() {
     byte[] src = getBytes();

@@ -30,6 +30,8 @@ public class ImpalaTextWritable extends Text {
     string_ = new ImpalaStringWritable(ptr);
   }
 
+  public void initialize() { string_.initialize(); }
+
   @Override
   public String toString() { return new String(getBytes()); }
   @Override
