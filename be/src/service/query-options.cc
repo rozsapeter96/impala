@@ -1099,6 +1099,10 @@ Status impala::SetQueryOption(const string& key, const string& value,
         query_options->__set_max_fragment_instances_per_node(max_num);
         break;
       }
+      case TImpalaQueryOptions::ALLOW_UNSAFE_CASTS: {
+        query_options->__set_allow_unsafe_casts(IsTrue(value));
+        break;
+      }
       default:
         if (IsRemovedQueryOption(key)) {
           LOG(WARNING) << "Ignoring attempt to set removed query option '" << key << "'";

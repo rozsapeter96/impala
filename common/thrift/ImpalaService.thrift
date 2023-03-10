@@ -791,6 +791,10 @@ enum TImpalaQueryOptions {
   // PROCESSING_COST_MIN_THREADS option has higher value.
   // Valid values are in [1, 128]. Default to 128.
   MAX_FRAGMENT_INSTANCES_PER_NODE = 156
+  // Allowing implicit casts with loss of precision.
+  // IMPALA-10173 adds the capability to use implicit casts between numeric and
+  // string types in set operations and insert statements.
+  ALLOW_UNSAFE_CASTS = 157
 }
 
 // The summary of a DML statement.

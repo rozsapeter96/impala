@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Optional;
 import java.util.Set;
 
 import org.apache.impala.analysis.BinaryPredicate.Operator;
@@ -34,6 +35,7 @@ import org.apache.impala.catalog.Function.CompareMode;
 import org.apache.impala.catalog.PrimitiveType;
 import org.apache.impala.catalog.ScalarType;
 import org.apache.impala.catalog.Type;
+import org.apache.impala.catalog.TypeCompatibility;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.InternalException;
 import org.apache.impala.common.SqlCastException;
@@ -653,15 +655,16 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
    *      called with fn(decimal(10,2), decimal(5,3))
    * both children will be cast to (11, 3).
    *
-   * If strictDecimal is true, we will only consider casts between decimal types that
-   * result in no loss of information. If it is not possible to come with such casts,
-   * we will throw an exception.
+   * 'compatibility' defines the mode of wildcard type resolution;
+   * TypeCompatibility.STRICT_DECIMAL only considers casts that result in no loss of
+   * information, TypeCompatibility.DEFAULT does not guarantee decimal cast without
+   * information loss.
    */
-  protected void castForFunctionCall(
-      boolean ignoreWildcardDecimals, boolean strictDecimal) throws AnalysisException {
+  protected void castForFunctionCall(boolean ignoreWildcardDecimals,
+      TypeCompatibility compatibility) throws AnalysisException {
     Preconditions.checkState(fn_ != null);
     Type[] fnArgs = fn_.getArgs();
-    Type resolvedWildcardType = getResolvedWildCardType(strictDecimal);
+    Type resolvedWildcardType = getResolvedWildCardType(compatibility);
     if (resolvedWildcardType != null) {
       if (resolvedWildcardType.isNull()) {
         throw new SqlCastException(String.format(
@@ -709,11 +712,13 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
 
   /**
    * Returns the max resolution type of all the wild card decimal types.
-   * Returns null if there are no wild card types. If strictDecimal is enabled, will
-   * return an invalid type if it is not possible to come up with a decimal type that
-   * is guaranteed to not lose information.
+   * Returns null if there are no wild card types. If compatibility.isStrictDecimal() is
+   * true, it will return an invalid type if it is not possible to come up with a decimal
+   * type that is guaranteed to not lose information.
    */
-  Type getResolvedWildCardType(boolean strictDecimal) {
+  Type getResolvedWildCardType(TypeCompatibility compatibility) {
+    Preconditions.checkState(compatibility.equals(TypeCompatibility.DEFAULT)
+        || compatibility.equals(TypeCompatibility.STRICT_DECIMAL));
     Type result = null;
     Type[] fnArgs = fn_.getArgs();
     for (int i = 0; i < children_.size(); ++i) {
@@ -730,8 +735,7 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
         ScalarType decimalType = (ScalarType) childType;
         result = decimalType.getMinResolutionDecimal();
       } else {
-        result = Type.getAssignmentCompatibleType(
-            result, childType, false, strictDecimal);
+        result = Type.getAssignmentCompatibleType(result, childType, compatibility);
       }
     }
     if (result != null && !result.isNull()) {
@@ -1106,7 +1110,8 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
     if (smap == null) return result;
     result = result.substituteImpl(smap, analyzer);
     result.analyze(analyzer);
-    if (preserveRootType && !type_.equals(result.getType())) result = result.castTo(type_);
+    if (preserveRootType && !type_.equals(result.getType()))
+      result = result.castTo(type_, analyzer.getPermissiveCompatibilityLevel());
     return result;
   }
 
@@ -1538,18 +1543,22 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
   }
 
   /**
-   * Casts this expr to a specific target type. It checks the validity of the cast and
-   * calls uncheckedCastTo().
+   * Casts this expr to a specific target type. It checks the validity of the cast
+   * according to 'compatibility' and calls uncheckedCastTo().
    * @param targetType
    *          type to be cast to
+   * @param compatibility
+   *          compatibility level that defines the relation between 'targetType' and the
+   *          type of the expression
    * @return cast expression, or converted literal,
    *         should never return null
    * @throws AnalysisException
    *           when an invalid cast is asked for, for example,
    *           failure to convert a string literal to a date literal
    */
-  public final Expr castTo(Type targetType) throws AnalysisException {
-    Type type = Type.getAssignmentCompatibleType(this.type_, targetType, false, false);
+  public final Expr castTo(Type targetType, TypeCompatibility compatibility)
+      throws AnalysisException {
+    Type type = Type.getAssignmentCompatibleType(this.type_, targetType, compatibility);
     Preconditions.checkState(type.isValid(), "cast %s to %s", this.type_, targetType);
     // If the targetType is NULL_TYPE then ignore the cast because NULL_TYPE
     // is compatible with all types and no cast is necessary.
@@ -1563,6 +1572,10 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
       }
     }
     return uncheckedCastTo(targetType);
+  }
+
+  public final Expr castTo(Type targetType) throws AnalysisException {
+    return castTo(targetType, TypeCompatibility.DEFAULT);
   }
 
   /**
@@ -1923,6 +1936,35 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
       return slotDesc.getSourceExprs().get(0);
     }
     return null;
+  }
+
+  /**
+   * Returns the first non-const expression on the following path:
+   * 1. checking whether the expression itself constant or not
+   * 2. checking the underlying slot ref's constness
+   * 3. checking the slot desc's source expressions constness
+   */
+  public Optional<Expr> getFirstNonConstSourceExpr() {
+    SlotRef slotRef = unwrapSlotRef(false);
+    Optional<Expr> nonConstExpr;
+    if (slotRef == null) {
+      nonConstExpr = !isConstant() ? Optional.of(this) : Optional.empty();
+      return nonConstExpr;
+    } else {
+      nonConstExpr = !slotRef.isConstant() ? Optional.of(slotRef) : Optional.empty();
+    }
+
+    SlotDescriptor slotDesc = slotRef.getDesc();
+    Preconditions.checkNotNull(slotDesc);
+
+    if (slotDesc.getSourceExprs().isEmpty()) {
+      return nonConstExpr;
+    }
+
+    return slotDesc.getSourceExprs()
+        .stream()
+        .filter(expr -> !expr.isConstant())
+        .findFirst();
   }
 
   /**

@@ -884,8 +884,7 @@ public class InsertStmt extends StatementBase {
       Expr widestTypeExpr =
           (widestTypeExprList != null) ? widestTypeExprList.get(i) : null;
       Expr compatibleExpr = checkTypeCompatibility(targetTableName_.toString(),
-          targetColumn, selectListExprs.get(i), analyzer.getQueryOptions().isDecimal_v2(),
-          widestTypeExpr);
+          targetColumn, selectListExprs.get(i), analyzer, widestTypeExpr);
       if (targetColumn.getPosition() < numClusteringCols) {
         // This is a dynamic clustering column
         tmpPartitionKeyExprs.add(compatibleExpr);
@@ -907,7 +906,7 @@ public class InsertStmt extends StatementBase {
           // tableColumns is guaranteed to exist after the earlier analysis checks
           Column tableColumn = table_.getColumn(pkv.getColName());
           Expr compatibleExpr = checkTypeCompatibility(targetTableName_.toString(),
-              tableColumn, pkv.getLiteralValue(), analyzer.isDecimalV2(), null);
+              tableColumn, pkv.getLiteralValue(), analyzer, null);
           tmpPartitionKeyExprs.add(compatibleExpr);
           tmpPartitionKeyNames.add(pkv.getColName());
         }
@@ -1063,9 +1062,7 @@ public class InsertStmt extends StatementBase {
         Expr widestTypeExpr =
             (widestTypeExprList != null) ? widestTypeExprList.get(i) : null;
         Expr compatibleExpr = checkTypeCompatibility(targetTableName_.toString(),
-            targetColumn, selectListExprs.get(i),
-            analyzer.getQueryOptions().isDecimal_v2(),
-            widestTypeExpr);
+            targetColumn, selectListExprs.get(i), analyzer, widestTypeExpr);
         Expr icebergPartitionTransformExpr =
             getIcebergPartitionTransformExpr(partField, compatibleExpr);
         partitionKeyExprs_.add(icebergPartitionTransformExpr);
