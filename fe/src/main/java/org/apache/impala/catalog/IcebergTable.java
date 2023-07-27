@@ -35,6 +35,7 @@ import org.apache.impala.analysis.IcebergPartitionField;
 import org.apache.impala.analysis.IcebergPartitionSpec;
 import org.apache.impala.analysis.IcebergPartitionTransform;
 import org.apache.impala.catalog.iceberg.GroupedContentFiles;
+import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.thrift.TCatalogObjectType;
 import org.apache.impala.thrift.TCompressionCodec;
@@ -437,7 +438,7 @@ public class IcebergTable extends Table implements FeIcebergTable {
   /**
    * Load schema and partitioning schemes directly from Iceberg.
    */
-  public void loadSchemaFromIceberg() throws TableLoadingException {
+  public void loadSchemaFromIceberg() throws TableLoadingException, ImpalaRuntimeException {
     loadSchema();
     addVirtualColumns();
     partitionSpecs_ = Utils.loadPartitionSpecByIceberg(this);

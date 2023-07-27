@@ -17,6 +17,8 @@
 
 package org.apache.impala.analysis;
 
+import com.google.common.base.Preconditions;
+import java.util.Collections;
 import org.apache.impala.authorization.Privilege;
 import org.apache.impala.catalog.FeIcebergTable;
 import org.apache.impala.catalog.FeKuduTable;
@@ -25,12 +27,14 @@ import org.apache.impala.common.AnalysisException;
 import org.apache.impala.thrift.TAlterTableDropPartitionParams;
 import org.apache.impala.thrift.TAlterTableParams;
 import org.apache.impala.thrift.TAlterTableType;
-import com.google.common.base.Preconditions;
+import org.apache.impala.thrift.TIcebergDropPartitionSummary;
+
 
 /**
  * Represents an ALTER TABLE DROP PARTITION statement.
  */
 public class AlterTableDropPartitionStmt extends AlterTableStmt {
+
   private final boolean ifExists_;
   private final PartitionSet partitionSet_;
 
@@ -65,26 +69,52 @@ public class AlterTableDropPartitionStmt extends AlterTableStmt {
     TAlterTableParams params = super.toThrift();
     params.setAlter_type(TAlterTableType.DROP_PARTITION);
     TAlterTableDropPartitionParams addPartParams = new TAlterTableDropPartitionParams();
-    addPartParams.setPartition_set(partitionSet_.toThrift());
     addPartParams.setIf_exists(!partitionSet_.getPartitionShouldExist());
     addPartParams.setPurge(purgePartition_);
     params.setDrop_partition_params(addPartParams);
+    if (table_ instanceof FeIcebergTable) {
+      TIcebergDropPartitionSummary summary = new TIcebergDropPartitionSummary();
+      if (partitionSet_.isIcebergTruncate()) {
+        summary.setPaths(Collections.emptyList());
+        summary.setIs_truncate(true);
+      } else {
+        summary.setPaths(partitionSet_.getIcebergFiles());
+      }
+      summary.num_partitions = partitionSet_.getNumberOfDroppedIcebergPartitions();
+      addPartParams.setIceberg_drop_partition_summary(summary);
+      addPartParams.setPartition_set(Collections.emptyList());
+    } else {
+      addPartParams.setPartition_set(partitionSet_.toThrift());
+    }
     return params;
   }
 
   @Override
   public void analyze(Analyzer analyzer) throws AnalysisException {
+    this.analyzer_ = analyzer;
     super.analyze(analyzer);
     FeTable table = getTargetTable();
     if (table instanceof FeKuduTable) {
       throw new AnalysisException("ALTER TABLE DROP PARTITION is not supported for " +
           "Kudu tables: " + partitionSet_.toSql());
-    } else if (table instanceof FeIcebergTable) {
-      throw new AnalysisException("ALTER TABLE DROP PARTITION is not supported for " +
-          "Iceberg tables: " + table.getFullName());
     }
     if (!ifExists_) partitionSet_.setPartitionShouldExist();
     partitionSet_.setPrivilegeRequirement(Privilege.ALTER);
     partitionSet_.analyze(analyzer);
+
+    if (table instanceof FeIcebergTable) {
+      analyzeIceberg();
+    }
+  }
+
+  public void analyzeIceberg() throws AnalysisException {
+    if (purgePartition_) {
+      throw new AnalysisException(
+          "Partition purge is not supported for Iceberg tables");
+    }
+    if (partitionSet_.getNumberOfDroppedIcebergPartitions() == 0 && !ifExists_) {
+      throw new AnalysisException(
+          "No matching partition(s) found");
+    }
   }
 }

@@ -626,6 +626,12 @@ struct TIcebergContentFileStore {
   6: optional bool has_parquet
 }
 
+struct TIcebergDropPartitionSummary {
+  1: required list<string> paths
+  2: optional bool is_truncate
+  3: required i64 num_partitions
+}
+
 struct TIcebergTable {
   // Iceberg file system table location
   1: required string table_location

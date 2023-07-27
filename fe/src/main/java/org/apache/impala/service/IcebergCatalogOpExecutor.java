@@ -35,7 +35,6 @@ import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.ReplacePartitions;
 import org.apache.iceberg.RowDelta;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.SnapshotManager;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableOperations;
@@ -55,6 +54,7 @@ import org.apache.impala.catalog.iceberg.IcebergCatalog;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.fb.FbIcebergColumnStats;
 import org.apache.impala.fb.FbIcebergDataFile;
+import org.apache.impala.thrift.TAlterTableDropPartitionParams;
 import org.apache.impala.thrift.TAlterTableExecuteExpireSnapshotsParams;
 import org.apache.impala.thrift.TAlterTableExecuteRollbackParams;
 import org.apache.impala.thrift.TColumn;
@@ -233,10 +233,27 @@ public class IcebergCatalogOpExecutor {
   }
 
   /**
-   * Drops a column from a Iceberg table.
+   * Deletes files related to specific set of partitions
    */
-  public static void dropColumn(Transaction txn, String colName)
-      throws TableLoadingException, ImpalaRuntimeException {
+  public static long alterTableDropPartition(
+      Transaction iceTxn, TAlterTableDropPartitionParams params) {
+    List<String> paths = params.iceberg_drop_partition_summary.paths;
+    DeleteFiles deleteFiles = iceTxn.newDelete();
+    if (params.iceberg_drop_partition_summary.is_truncate) {
+      deleteFiles.deleteFromRowFilter(Expressions.alwaysTrue());
+    } else {
+      for (String path : paths) {
+        deleteFiles.deleteFile(path);
+      }
+    }
+    deleteFiles.commit();
+    return params.iceberg_drop_partition_summary.num_partitions;
+  }
+
+  /**
+   * Drops a column from an Iceberg table.
+   */
+  public static void dropColumn(Transaction txn, String colName) {
     UpdateSchema schema = txn.updateSchema();
     schema.deleteColumn(colName);
     schema.commit();

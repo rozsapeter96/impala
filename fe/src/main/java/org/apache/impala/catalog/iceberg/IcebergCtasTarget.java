@@ -51,6 +51,8 @@ import org.apache.impala.catalog.IcebergStructField;
 import org.apache.impala.catalog.IcebergTable;
 import org.apache.impala.catalog.local.LocalDb;
 import org.apache.impala.catalog.local.LocalFsTable;
+import org.apache.impala.common.AnalysisException;
+import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.catalog.StructType;
 import org.apache.impala.service.MetadataOp;
@@ -90,7 +92,7 @@ public class IcebergCtasTarget extends CtasTargetTable implements FeIcebergTable
 
   public IcebergCtasTarget(FeDb db, org.apache.hadoop.hive.metastore.api.Table msTbl,
       List<ColumnDef> columnDefs, IcebergPartitionSpec partSpec)
-      throws CatalogException {
+      throws CatalogException, ImpalaRuntimeException {
     super(msTbl, db, msTbl.getTableName(), msTbl.getOwner());
     createFsTable(db, msTbl);
     createIcebergSchema(columnDefs);
@@ -125,11 +127,11 @@ public class IcebergCtasTarget extends CtasTargetTable implements FeIcebergTable
   }
 
   private void createPartitionSpec(IcebergPartitionSpec partSpec)
-      throws CatalogException {
+      throws CatalogException, ImpalaRuntimeException {
     Preconditions.checkState(iceSchema_ != null);
     PartitionSpec iceSpec = null;
     try {
-      // Let's create an Iceberg PartitionSpec with the help of Icebeg from 'partSpec',
+      // Let's create an Iceberg PartitionSpec with the help of Iceberg from 'partSpec',
       // then convert it back to an IcebergPartitionSpec.
       if (partSpec == null) {
         iceSpec = PartitionSpec.unpartitioned();

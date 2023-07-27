@@ -347,11 +347,6 @@ ALTER TABLE iceberg_table_hadoop_catalog ADD PARTITION(fake_col='fake_value');
 AnalysisException: ALTER TABLE ADD PARTITION is not supported for Iceberg tables: $DATABASE.iceberg_table_hadoop_catalog
 ====
 ---- QUERY
-ALTER TABLE iceberg_table_hadoop_catalog DROP PARTITION(fake_col='fake_value');
----- CATCH
-AnalysisException: ALTER TABLE DROP PARTITION is not supported for Iceberg tables: $DATABASE.iceberg_table_hadoop_catalog
-====
----- QUERY
 ALTER TABLE iceberg_table_hadoop_catalog RECOVER PARTITIONS;
 ---- CATCH
 AnalysisException: ALTER TABLE RECOVER PARTITIONS is not supported on Iceberg tables: $DATABASE.iceberg_table_hadoop_catalog
