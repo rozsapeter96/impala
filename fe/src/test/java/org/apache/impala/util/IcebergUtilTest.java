@@ -23,6 +23,7 @@ import static org.apache.impala.thrift.TIcebergCatalog.CATALOGS;
 import static org.apache.impala.thrift.TIcebergCatalog.HADOOP_CATALOG;
 import static org.apache.impala.thrift.TIcebergCatalog.HADOOP_TABLES;
 import static org.apache.impala.thrift.TIcebergCatalog.HIVE_CATALOG;
+import static org.apache.impala.util.IcebergUtil.getDateTransformValue;
 import static org.apache.impala.util.IcebergUtil.getFilePathHash;
 import static org.apache.impala.util.IcebergUtil.getIcebergFileFormat;
 import static org.apache.impala.util.IcebergUtil.getPartitionTransform;
@@ -34,11 +35,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableList;
 
+import java.util.Map;
+import java.util.Optional;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
@@ -53,7 +57,6 @@ import org.apache.impala.analysis.IcebergPartitionTransform;
 import org.apache.impala.catalog.HdfsFileFormat;
 import org.apache.impala.catalog.IcebergColumn;
 import org.apache.impala.catalog.IcebergTable;
-import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.catalog.Type;
 import org.apache.impala.catalog.iceberg.IcebergCatalog;
 import org.apache.impala.catalog.iceberg.IcebergCatalogs;
@@ -202,7 +205,7 @@ public class IcebergUtilTest {
       try {
         transform = getPartitionTransform(
             partitionTransform.transformName, partitionTransform.parameter);
-      } catch (TableLoadingException t) {
+      } catch (AnalysisException t) {
         fail("Transform " + partitionTransform + " caught unexpected  " + t);
       }
       assertNotNull(transform);
@@ -223,7 +226,7 @@ public class IcebergUtilTest {
         /* IcebergPartitionTransform transform = */ getPartitionTransform(
             partitionTransform.transformName, partitionTransform.parameter);
         fail("Transform " + partitionTransform + " should have got exception");
-      } catch (TableLoadingException t) {
+      } catch (AnalysisException t) {
         // OK, fall through
       }
     }
@@ -239,7 +242,7 @@ public class IcebergUtilTest {
       try {
         transform = getPartitionTransform(
             partitionTransform.transformName, partitionTransform.parameter);
-      } catch (TableLoadingException t) {
+      } catch (AnalysisException t) {
         fail("Transform " + partitionTransform + " caught unexpected  " + t);
       }
       assertNotNull(transform);
@@ -271,7 +274,7 @@ public class IcebergUtilTest {
     int numBuckets = 128;
     PartitionSpec partitionSpec =
         PartitionSpec.builderFor(SCHEMA).bucket("i", numBuckets).build();
-    HashMap<String, Integer> partitionTransformParams =
+    Map<String, Integer> partitionTransformParams =
         getPartitionTransformParams(partitionSpec);
     assertNotNull(partitionTransformParams);
     String expectedKey = "1_BUCKET";
@@ -323,6 +326,58 @@ public class IcebergUtilTest {
       IcebergPartitionSpec icebergPartitionSpec = new IcebergPartitionSpec(4, fieldList);
       assertFalse(isPartitionColumn(column, icebergPartitionSpec));
     }
+  }
+
+  /**
+   * Unit test for getDateTransformValue
+   */
+  @Test
+  public void testGetDateTransformValue() {
+    Optional<Integer> identityTransform =
+        getDateTransformValue(TIcebergPartitionTransformType.IDENTITY, "string");
+    Optional<Integer> bucketTransform =
+        getDateTransformValue(TIcebergPartitionTransformType.BUCKET, "string");
+    Optional<Integer> truncateTransform =
+        getDateTransformValue(TIcebergPartitionTransformType.TRUNCATE, "string");
+    Optional<Integer> voidTransform =
+        getDateTransformValue(TIcebergPartitionTransformType.VOID, "string");
+
+    Optional<Integer> yearTransformValidString =
+        getDateTransformValue(TIcebergPartitionTransformType.YEAR, "2023");
+    Optional<Integer> yearTransformInvalidString =
+        getDateTransformValue(TIcebergPartitionTransformType.YEAR, "2023-12");
+    Optional<Integer> monthTransformValidString =
+        getDateTransformValue(TIcebergPartitionTransformType.MONTH, "2023-12");
+    Optional<Integer> monthTransformInvalidString =
+        getDateTransformValue(TIcebergPartitionTransformType.MONTH, "2023");
+    Optional<Integer> dayTransformValidString =
+        getDateTransformValue(TIcebergPartitionTransformType.DAY, "2023-12-12");
+    Optional<Integer> dayTransformInvalidString =
+        getDateTransformValue(TIcebergPartitionTransformType.DAY, "2023-12-12-1");
+    Optional<Integer> hourTransformValidString =
+        getDateTransformValue(TIcebergPartitionTransformType.HOUR, "2023-12-12-1");
+    Optional<Integer> hourTransformInvalidString =
+        getDateTransformValue(TIcebergPartitionTransformType.HOUR, "2023-12");
+
+    assertFalse(identityTransform.isPresent());
+    assertFalse(bucketTransform.isPresent());
+    assertFalse(truncateTransform.isPresent());
+    assertFalse(voidTransform.isPresent());
+
+    assertHasValue(yearTransformValidString, 53);
+    assertHasValue(monthTransformValidString, 647);
+    assertHasValue(dayTransformValidString, 19703);
+    assertHasValue(hourTransformValidString, 472873);
+
+    assertFalse(yearTransformInvalidString.isPresent());
+    assertFalse(monthTransformInvalidString.isPresent());
+    assertFalse(dayTransformInvalidString.isPresent());
+    assertFalse(hourTransformInvalidString.isPresent());
+  }
+
+  private void assertHasValue(Optional<Integer> value, int expected) {
+    assertTrue(value.isPresent());
+    assertEquals(expected, value.get().intValue());
   }
 
   /**

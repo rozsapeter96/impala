@@ -544,7 +544,7 @@ public interface FeIcebergTable extends FeFsTable {
      * @return a list of {@link org.apache.hadoop.hive.metastore.api.FieldSchema}
      */
     public static List<FieldSchema> getPartitionTransformKeys(FeIcebergTable table)
-        throws TableLoadingException {
+        throws AnalysisException {
       Table icebergTable = table.getIcebergApiTable();
 
       if (icebergTable.specs().isEmpty()) {
@@ -552,7 +552,7 @@ public interface FeIcebergTable extends FeFsTable {
       }
 
       PartitionSpec latestSpec = icebergTable.spec();
-      HashMap<String, Integer> transformParams = IcebergUtil.getPartitionTransformParams(
+      Map<String, Integer> transformParams = IcebergUtil.getPartitionTransformParams(
           latestSpec);
       List<FieldSchema> fieldSchemaList = Lists.newArrayList();
       for (PartitionField field : latestSpec.fields()) {
@@ -880,7 +880,7 @@ public interface FeIcebergTable extends FeFsTable {
      * Get iceberg partition spec by iceberg table metadata
      */
     public static List<IcebergPartitionSpec> loadPartitionSpecByIceberg(
-        FeIcebergTable table) throws TableLoadingException {
+        FeIcebergTable table) throws AnalysisException {
       List<IcebergPartitionSpec> ret = new ArrayList<>();
       for (PartitionSpec spec : table.getIcebergApiTable().specs().values()) {
         ret.add(convertPartitionSpec(spec));
@@ -889,9 +889,9 @@ public interface FeIcebergTable extends FeFsTable {
     }
 
     public static IcebergPartitionSpec convertPartitionSpec(PartitionSpec spec)
-        throws TableLoadingException {
-      List<IcebergPartitionField> fields = new ArrayList<>();;
-      HashMap<String, Integer> transformParams =
+        throws AnalysisException {
+      List<IcebergPartitionField> fields = new ArrayList<>();
+      Map<String, Integer> transformParams =
           IcebergUtil.getPartitionTransformParams(spec);
       for (PartitionField field : spec.fields()) {
         fields.add(new IcebergPartitionField(field.sourceId(), field.fieldId(),

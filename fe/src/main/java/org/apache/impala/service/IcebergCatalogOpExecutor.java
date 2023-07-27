@@ -22,6 +22,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import java.util.Map.Entry;
+import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.DataFile;
@@ -47,6 +49,8 @@ import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.impala.analysis.IcebergPartitionSpec;
 import org.apache.impala.catalog.FeIcebergTable;
+import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
+import org.apache.impala.catalog.IcebergContentFileStore;
 import org.apache.impala.catalog.IcebergTable;
 import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.catalog.TableNotFoundException;
@@ -55,6 +59,7 @@ import org.apache.impala.catalog.iceberg.IcebergCatalog;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.fb.FbIcebergColumnStats;
 import org.apache.impala.fb.FbIcebergDataFile;
+import org.apache.impala.thrift.TAlterTableDropPartitionParams;
 import org.apache.impala.thrift.TAlterTableExecuteExpireSnapshotsParams;
 import org.apache.impala.thrift.TAlterTableExecuteRollbackParams;
 import org.apache.impala.thrift.TColumn;
@@ -233,10 +238,27 @@ public class IcebergCatalogOpExecutor {
   }
 
   /**
-   * Drops a column from a Iceberg table.
+   * Deletes files related to specific set of partitions
    */
-  public static void dropColumn(Transaction txn, String colName)
-      throws TableLoadingException, ImpalaRuntimeException {
+  public static long alterTableDropPartition(
+      Transaction iceTxn, FeIcebergTable tbl, TAlterTableDropPartitionParams params) {
+    IcebergContentFileStore contentFileStore = IcebergContentFileStore.fromThrift(
+        params.getIceberg_drop_partition_summary().getContent_files(), null, null);
+    Map<String, Long> partitionSummary =
+        params.iceberg_drop_partition_summary.affected_partitions;
+    DeleteFiles deleteFiles = iceTxn.newDelete();
+    for (FileDescriptor fileDescriptor : contentFileStore.getAllFiles()) {
+      String path = tbl.getHdfsBaseDir() + Path.SEPARATOR + fileDescriptor.getPath();
+      deleteFiles.deleteFile(path);
+    }
+    deleteFiles.commit();
+    return partitionSummary.size();
+  }
+
+  /**
+   * Drops a column from an Iceberg table.
+   */
+  public static void dropColumn(Transaction txn, String colName) {
     UpdateSchema schema = txn.updateSchema();
     schema.deleteColumn(colName);
     schema.commit();

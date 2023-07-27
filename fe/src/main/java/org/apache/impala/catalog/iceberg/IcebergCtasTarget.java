@@ -52,6 +52,7 @@ import org.apache.impala.catalog.IcebergTable;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.catalog.local.LocalDb;
 import org.apache.impala.catalog.local.LocalFsTable;
+import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.catalog.StructType;
 import org.apache.impala.service.MetadataOp;
@@ -91,7 +92,7 @@ public class IcebergCtasTarget extends CtasTargetTable implements FeIcebergTable
 
   public IcebergCtasTarget(FeDb db, org.apache.hadoop.hive.metastore.api.Table msTbl,
       List<ColumnDef> columnDefs, IcebergPartitionSpec partSpec)
-      throws CatalogException {
+      throws CatalogException, AnalysisException {
     super(msTbl, db, msTbl.getTableName(), msTbl.getOwner());
     createFsTable(db, msTbl);
     createIcebergSchema(columnDefs);
@@ -126,7 +127,7 @@ public class IcebergCtasTarget extends CtasTargetTable implements FeIcebergTable
   }
 
   private void createPartitionSpec(IcebergPartitionSpec partSpec)
-      throws CatalogException {
+      throws CatalogException, AnalysisException {
     Preconditions.checkState(iceSchema_ != null);
     PartitionSpec iceSpec = null;
     try {
