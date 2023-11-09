@@ -17,17 +17,26 @@
 
 package org.apache.impala.catalog.iceberg;
 
+import com.google.common.collect.Lists;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.google.common.collect.Iterables;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.io.CloseableIterable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Struct-like object to group different Iceberg content files:
@@ -36,6 +45,8 @@ import org.apache.iceberg.io.CloseableIterable;
  * - delete files
  */
 public class GroupedContentFiles {
+
+  private static final Logger LOG  = LoggerFactory.getLogger(GroupedContentFiles.class);
   public List<DataFile> dataFilesWithoutDeletes = new ArrayList<>();
   public List<DataFile> dataFilesWithDeletes = new ArrayList<>();
   public Set<DeleteFile> deleteFiles = new HashSet<>();
@@ -64,5 +75,37 @@ public class GroupedContentFiles {
 
   public boolean isEmpty() {
     return Iterables.isEmpty(getAllContentFiles());
+  }
+
+  public Map<Path, List<ContentFile<?>>> groupByPartition(){
+    Map<Path, List<ContentFile<?>>> groupedFiles = new HashMap<>();
+    for (ContentFile<?> file : getAllContentFiles()) {
+      groupedFiles.merge(removeLastUnitFromPath(file.path()),
+          Lists.newArrayList(file), (left, right) -> {
+            left.addAll(right);
+            return left;
+          });
+    }
+    return groupedFiles;
+  }
+
+  public Set<Path> groupByPartitionPath() {
+    return StreamSupport.stream(getAllContentFiles().spliterator(), true)
+        .map(contentFile -> new CountedPath(String.valueOf(contentFile.path())).getParent())
+        .collect(Collectors.toSet());
+  }
+
+  private Path removeLastUnitFromPath(CharSequence pathAsCharSequence){
+    return new Path(String.valueOf(pathAsCharSequence)).getParent();
+  }
+
+  private static class CountedPath extends Path{
+
+    private static int count = 0;
+    public CountedPath(String value){
+      super(value);
+      LOG.info("Count of Paths: {}", count++);
+    }
+
   }
 }

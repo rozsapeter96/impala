@@ -17,6 +17,8 @@
 
 package org.apache.impala.catalog;
 
+import static org.apache.impala.catalog.ParallelFileMetadataLoader.MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
@@ -24,9 +26,15 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -39,6 +47,7 @@ import org.apache.impala.catalog.FeIcebergTable.Utils;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.catalog.iceberg.GroupedContentFiles;
 import org.apache.impala.common.FileSystemUtil;
+import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
 import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.TNetworkAddress;
@@ -188,21 +197,14 @@ public class IcebergFileMetadataLoader extends FileMetadataLoader {
   protected List<FileStatus> getFileStatuses(FileSystem fs, boolean listWithLocations)
       throws IOException {
     if (icebergFiles_.isEmpty()) return null;
-    RemoteIterator<? extends FileStatus> fileStatuses = null;
     // For the FSs in 'FileSystemUtil#SCHEME_SUPPORT_STORAGE_IDS' (e.g. HDFS, Ozone,
     // Alluxio, etc.) we ensure the file with block location information, so we're going
     // to get the block information through 'FileSystemUtil.listFiles'.
-    if (listWithLocations) {
-      fileStatuses = FileSystemUtil.listFiles(fs, partDir_, recursive_, debugAction_);
-    }
-    Map<Path, FileStatus> nameToFileStatus = Maps.newHashMap();
-    if (fileStatuses != null) {
-      while (fileStatuses.hasNext()) {
-        FileStatus status = fileStatuses.next();
-        nameToFileStatus.put(status.getPath(), status);
-      }
-    }
+    Map<Path, FileStatus> nameToFileStatus = Collections.emptyMap();
 
+    if (listWithLocations) {
+      nameToFileStatus = parallelListing(fs);
+    }
     List<FileStatus> stats = Lists.newLinkedList();
     for (ContentFile<?> contentFile : icebergFiles_.getAllContentFiles()) {
       Path path = FileSystemUtil.createFullyQualifiedPath(
@@ -227,6 +229,75 @@ public class IcebergFileMetadataLoader extends FileMetadataLoader {
       }
     }
     return stats;
+  }
+
+  private Map<Path, FileStatus> listing(FileSystem fs) throws IOException {
+    RemoteIterator<? extends FileStatus> fileStatuses = FileSystemUtil.listFiles(
+        fs, partDir_, recursive_, debugAction_);
+    Map<Path, FileStatus> nameToFileStatus = Maps.newHashMap();
+    if (fileStatuses != null) {
+      while (fileStatuses.hasNext()) {
+        FileStatus status = fileStatuses.next();
+        nameToFileStatus.put(status.getPath(), status);
+      }
+    }
+    return nameToFileStatus;
+  }
+
+  private Map<Path, FileStatus> parallelListing(FileSystem fs)
+      throws IOException {
+    Set<Path> partitionPaths = icebergFiles_.groupByPartitionPath();
+    Map<Path, FileStatus> nameToFileStatus = Maps.newHashMap();
+    String logPrefix = "Parallel Iceberg metadata listing";
+    int failedLoadTasks = 0;
+    ExecutorService pool = ParallelFileMetadataLoader.createPool(
+        partitionPaths.size(), fs, logPrefix);
+    try (ThreadNameAnnotator tna = new ThreadNameAnnotator(logPrefix)) {
+      List<Pair<Path, Future<Map<Path, FileStatus>>>> futures =
+          new ArrayList<>(partitionPaths.size());
+      for (Path partitionPath : partitionPaths) {
+        futures.add(new Pair<>(
+            partitionPath, pool.submit(() -> {
+          RemoteIterator<? extends FileStatus> remoteIterator = FileSystemUtil.listFiles(
+              fs, partitionPath, recursive_, debugAction_);
+          Map<Path, FileStatus> perThreadMapping = new HashMap<>();
+          while (remoteIterator.hasNext()) {
+            FileStatus status = remoteIterator.next();
+            perThreadMapping.put(status.getPath(), status);
+          }
+          nameToFileStatus.putAll(perThreadMapping);
+          return perThreadMapping;
+        })));
+      }
+
+      // Wait for the loaders to finish.
+      for (Pair<Path, Future<Map<Path, FileStatus>>> future : futures) {
+        try {
+          Map<Path, FileStatus> pathFileStatusMap = future.second.get();
+          nameToFileStatus.putAll(pathFileStatusMap);
+        } catch (ExecutionException | InterruptedException e) {
+          if (++failedLoadTasks <= MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG) {
+            LOG.error("{} encountered an error loading data for path {}",
+                logPrefix, future.first.getName(), e);
+          }
+        }
+      }
+    } finally {
+      pool.shutdown();
+    }
+    if (failedLoadTasks > 0) {
+      int errorsNotLogged =
+          failedLoadTasks - MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG;
+      if (errorsNotLogged > 0) {
+        LOG.error("{} error loading {} paths. Only the first {} errors " +
+                "were logged", logPrefix, failedLoadTasks,
+            MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG);
+      }
+      throw new IOException(String.format(
+          "%s: failed to load %d paths. Check the catalog server log for more details.",
+          logPrefix, failedLoadTasks));
+    }
+    return nameToFileStatus;
   }
 
   @VisibleForTesting
