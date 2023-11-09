@@ -66,7 +66,7 @@ public class ParallelFileMetadataLoader {
       BackendConfig.INSTANCE.maxNonHdfsPartsParallelLoad();
 
   // Maximum number of errors logged when loading partitioned tables.
-  private static final int MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG = 100;
+  public static final int MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG = 100;
 
   private final String logPrefix_;
   private final Map<Path, FileMetadataLoader> loaders_;
@@ -169,7 +169,7 @@ public class ParallelFileMetadataLoader {
     if (loaders_.isEmpty()) return;
 
     int failedLoadTasks = 0;
-    ExecutorService pool = createPool();
+    ExecutorService pool = createPool(loaders_.size(), fs_, logPrefix_);
     try (ThreadNameAnnotator tna = new ThreadNameAnnotator(logPrefix_)) {
       List<Pair<FileMetadataLoader, Future<Void>>> futures =
           new ArrayList<>(loaders_.size());
@@ -215,10 +215,9 @@ public class ParallelFileMetadataLoader {
    * clusters. We narrowed it down to scalability bottlenecks in HDFS RPC implementation
    * (HADOOP-14558) on both the server and the client side.
    */
-  private ExecutorService createPool() {
-    int numLoaders = loaders_.size();
+  public static ExecutorService createPool(int numLoaders, FileSystem fs, String logPrefix) {
     Preconditions.checkState(numLoaders > 0);
-    int poolSize = FileSystemUtil.supportsStorageIds(fs_) ?
+    int poolSize = FileSystemUtil.supportsStorageIds(fs) ?
         MAX_HDFS_PARTITIONS_PARALLEL_LOAD : MAX_NON_HDFS_PARTITIONS_PARALLEL_LOAD;
     // Thread pool size need not exceed the number of paths to be loaded.
     poolSize = Math.min(numLoaders, poolSize);
@@ -226,7 +225,7 @@ public class ParallelFileMetadataLoader {
     if (poolSize == 1) {
       return MoreExecutors.newDirectExecutorService();
     } else {
-      LOG.info(logPrefix_ + " using a thread pool of size {}", poolSize);
+      LOG.info("{} using a thread pool of size {}", logPrefix, poolSize);
       return Executors.newFixedThreadPool(poolSize);
     }
   }
