@@ -415,6 +415,9 @@ DEFINE_int32(iceberg_reload_new_files_threshold, 100, "(Advanced) If during a ta
     "reload all file metadata. If number of new files are less or equal to this, "
     "catalogd will only load the metadata of the newly added files.");
 
+DEFINE_bool(iceberg_restrict_data_location, false, "If true, Impala restricts"
+ "Iceberg data file locations inside the table directory");
+
 // Host and port of Statestore Service
 DEFINE_string(state_store_host, "localhost",
     "hostname where StatestoreService is running");

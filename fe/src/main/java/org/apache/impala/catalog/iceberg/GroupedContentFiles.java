@@ -23,11 +23,16 @@ import java.util.List;
 import java.util.Set;
 
 import com.google.common.collect.Iterables;
+import java.util.function.Function;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.impala.catalog.TableLoadingException;
+import org.apache.impala.common.ImpalaException;
 
 /**
  * Struct-like object to group different Iceberg content files:
@@ -42,13 +47,20 @@ public class GroupedContentFiles {
 
   public GroupedContentFiles() { }
 
-  public GroupedContentFiles(CloseableIterable<FileScanTask> fileScanTasks) {
+  public GroupedContentFiles(CloseableIterable<FileScanTask> fileScanTasks,
+     FilePathValidator validator) throws TableLoadingException {
     for (FileScanTask scanTask : fileScanTasks) {
-      if (scanTask.deletes().isEmpty()) {
-        dataFilesWithoutDeletes.add(scanTask.file());
+      DataFile dataFile = scanTask.file();
+      List<DeleteFile> deleteFileList = scanTask.deletes();
+      validator.validate(dataFile);
+      if (deleteFileList.isEmpty()) {
+        dataFilesWithoutDeletes.add(dataFile);
       } else {
-        dataFilesWithDeletes.add(scanTask.file());
-        deleteFiles.addAll(scanTask.deletes());
+        for (DeleteFile deleteFile : deleteFileList) {
+          validator.validate(deleteFile);
+        }
+        dataFilesWithDeletes.add(dataFile);
+        this.deleteFiles.addAll(deleteFileList);
       }
     }
   }
@@ -65,4 +77,47 @@ public class GroupedContentFiles {
   public boolean isEmpty() {
     return Iterables.isEmpty(getAllContentFiles());
   }
+
+  public static abstract class FilePathValidator {
+
+    protected Path tableLocationPath_;
+
+    protected FilePathValidator(String tableLocation){
+      this.tableLocationPath_ = new Path(tableLocation);
+    }
+    public abstract boolean  validate(ContentFile<?> file) throws TableLoadingException;
+
+  }
+
+  public static class RestrictiveFilePathValidator extends FilePathValidator{
+
+    public RestrictiveFilePathValidator(String tableLocation) {
+      super(tableLocation);
+    }
+
+    @Override
+    public boolean validate(ContentFile<?> file)
+        throws TableLoadingException {
+      Path filePath = new Path(String.valueOf(file.path()));
+      if(!FileUtils.isPathWithinSubtree(filePath,this.tableLocationPath_)) {
+        throw new TableLoadingException(String.format("Data file is outside of the table directory: %s", filePath));
+      }
+      return true;
+    }
+  }
+
+  public static class NoOpFilePathValidator extends FilePathValidator{
+
+    public NoOpFilePathValidator(String tableLocation) {
+      super(tableLocation);
+    }
+
+    @Override
+    public boolean validate(ContentFile<?> file)
+        throws TableLoadingException {
+      return true;
+    }
+  }
+
 }
+

@@ -261,15 +261,17 @@ struct TBackendGflags {
 
   115: required i32 iceberg_reload_new_files_threshold
 
-  116: required bool enable_skipping_older_events;
+  116: required bool enable_skipping_older_events
 
   117: required bool enable_json_scanner
 
-  118: required double max_filter_error_rate_from_full_scan
+  118: required bool iceberg_restrict_data_location
 
-  119: required i32 local_catalog_cache_concurrency_level
+  119: required double max_filter_error_rate_from_full_scan
 
-  120: required i32 catalog_operation_log_size
+  120: required i32 local_catalog_cache_concurrency_level
 
-  121: required string hostname
+  121: required i32 catalog_operation_log_size
+
+  122: required string hostname
 }

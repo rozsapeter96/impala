@@ -78,6 +78,9 @@ import org.apache.impala.catalog.IcebergTable;
 import org.apache.impala.catalog.IcebergTableLoadingException;
 import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.catalog.iceberg.GroupedContentFiles;
+import org.apache.impala.catalog.iceberg.GroupedContentFiles.FilePathValidator;
+import org.apache.impala.catalog.iceberg.GroupedContentFiles.NoOpFilePathValidator;
+import org.apache.impala.catalog.iceberg.GroupedContentFiles.RestrictiveFilePathValidator;
 import org.apache.impala.catalog.iceberg.IcebergCatalog;
 import org.apache.impala.catalog.iceberg.IcebergCatalogs;
 import org.apache.impala.catalog.iceberg.IcebergHadoopCatalog;
@@ -92,6 +95,7 @@ import org.apache.impala.fb.FbIcebergDataFileFormat;
 import org.apache.impala.fb.FbIcebergMetadata;
 import org.apache.impala.fb.FbIcebergPartitionTransformValue;
 import org.apache.impala.fb.FbIcebergTransformType;
+import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.TCompressionCodec;
 import org.apache.impala.thrift.THdfsCompression;
 import org.apache.impala.thrift.THdfsFileFormat;
@@ -575,15 +579,20 @@ public class IcebergUtil {
    * Returns lists of data and delete files in the Iceberg table.
    */
   public static GroupedContentFiles getIcebergFiles(
-      FeIcebergTable table, List<Expression> predicates, TimeTravelSpec timeTravelSpec)
-        throws TableLoadingException {
+      FeIcebergTable table, List<Expression> predicates,
+      TimeTravelSpec timeTravelSpec)
+      throws TableLoadingException {
     try (CloseableIterable<FileScanTask> fileScanTasks = planFiles(
         table, predicates, timeTravelSpec)) {
-      return new GroupedContentFiles(fileScanTasks);
+      FilePathValidator validator;
+      validator = new NoOpFilePathValidator(table.getLocation());
+      return new GroupedContentFiles(fileScanTasks, validator);
     } catch (IOException e) {
-      throw new TableLoadingException("Error during reading Iceberg manifest files.", e);
+      throw new TableLoadingException(
+          "Error during reading Iceberg manifest files.", e);
     }
   }
+
 
   private static TableScan createScanAsOf(FeIcebergTable table,
       TimeTravelSpec timeTravelSpec) {
@@ -638,6 +647,10 @@ public class IcebergUtil {
           throw new ImpalaRuntimeException(String.format("Unexpected file format: %s",
               org.apache.impala.fb.FbIcebergDataFileFormat.name(fbFileFormat)));
     }
+  }
+
+  private static boolean validateFilePaths(ContentFile<?> file) throws TableLoadingException{
+    return true;
   }
 
   /**

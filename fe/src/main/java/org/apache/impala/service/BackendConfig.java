@@ -46,6 +46,7 @@ public class BackendConfig {
   private BackendConfig(TBackendGflags cfg) {
     backendCfg_ = cfg;
     warnCatalogResponseSize_ = cfg.warn_catalog_response_size_mb * 1024L * 1024L;
+    warnCatalogResponseSize_ = cfg.warn_catalog_response_size_mb * 1024L * 1024L;
     warnCatalogResponseDurationMs_ = cfg.warn_catalog_response_duration_s * 1000L;
   }
 
@@ -427,6 +428,10 @@ public class BackendConfig {
 
   public int icebergReloadNewFilesThreshold() {
     return backendCfg_.iceberg_reload_new_files_threshold;
+  }
+
+  public boolean icebergRestrictDataLocation() {
+    return backendCfg_.iceberg_restrict_data_location;
   }
 
   public boolean isJsonScannerEnabled() {
