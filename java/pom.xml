@@ -312,12 +312,12 @@ under the License.
 
       <dependency>
         <groupId>org.bouncycastle</groupId>
-        <artifactId>bcprov-jdk15on</artifactId>
+        <artifactId>bcprov-jdk15on18</artifactId>
         <version>${bouncy-castle.version}</version>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
-        <artifactId>bcpkix-jdk15on</artifactId>
+        <artifactId>bcpkix-jdk15on18</artifactId>
         <version>${bouncy-castle.version}</version>
       </dependency>
 
