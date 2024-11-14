@@ -33,12 +33,13 @@ import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.planner.DataSink;
-import org.apache.impala.planner.IcebergBufferedDeleteSink;
 import org.apache.impala.planner.IcebergMergeNode;
 import org.apache.impala.planner.IcebergMergeSink;
 import org.apache.impala.planner.PlanNode;
 import org.apache.impala.planner.PlannerContext;
 import org.apache.impala.planner.TableSink;
+import org.apache.impala.planner.TableSink.Op;
+import org.apache.impala.planner.TableSink.TableSinkArgs;
 import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.TSortingOrder;
 import org.apache.impala.util.IcebergUtil;
@@ -252,15 +253,16 @@ public class IcebergMergeImpl implements MergeImpl {
     if (icebergTable_.isPartitioned()) {
       deletePartitionKeys = targetPartitionMetaExpressions_;
     }
-    return new IcebergBufferedDeleteSink(icebergPositionalDeleteTable_,
-        deletePartitionKeys, targetPositionMetaExpressions_, deleteTableId_);
+    return TableSink.create(icebergPositionalDeleteTable_, Op.DELETE,
+        deletePartitionKeys, targetPositionMetaExpressions_,
+        TableSinkArgs.withDeleteTableId(deleteTableId_));
   }
 
   public TableSink createInsertSink() {
+    TableSinkArgs args = TableSinkArgs.withMaxTableSinks(mergeStmt_.maxTableSinks_);
+    args.sortProperties = targetSorting_.sortingColumnsAndOrder();
     return TableSink.create(icebergTable_, TableSink.Op.INSERT,
-        targetPartitionExpressions_, targetExpressions_, Collections.emptyList(), false,
-        false, targetSorting_.sortingColumnsAndOrder(), -1, null,
-        mergeStmt_.maxTableSinks_);
+        targetPartitionExpressions_, targetExpressions_, args);
   }
 
   /**

@@ -56,6 +56,7 @@ import org.apache.impala.common.Pair;
 import org.apache.impala.planner.DataSink;
 import org.apache.impala.planner.HdfsTableSink;
 import org.apache.impala.planner.TableSink;
+import org.apache.impala.planner.TableSink.TableSinkArgs;
 import org.apache.impala.rewrite.ExprRewriter;
 import org.apache.impala.thrift.TIcebergPartitionTransformType;
 import org.apache.impala.thrift.TSortingOrder;
@@ -1170,10 +1171,15 @@ public class InsertStmt extends DmlStatementBase {
   public DataSink createDataSink() {
     // analyze() must have been called before.
     Preconditions.checkState(table_ != null);
+    TableSinkArgs args = TableSinkArgs.withMaxTableSinks(maxTableSinks_);
+    args.sortProperties = new Pair<>(sortColumns_, sortingOrder_);
+    args.referencedColumns = mentionedColumns_;
+    args.overwrite = overwrite_;
+    args.inputIsClustered = requiresClustering();
+    args.writeId = writeId_;
+    args.kuduTxnToken = kuduTxnToken_;
     return TableSink.create(table_, isUpsert_ ? TableSink.Op.UPSERT : TableSink.Op.INSERT,
-        partitionKeyExprs_, resultExprs_, mentionedColumns_, overwrite_,
-        requiresClustering(), new Pair<>(sortColumns_, sortingOrder_), writeId_,
-        kuduTxnToken_, maxTableSinks_);
+        partitionKeyExprs_, resultExprs_, args);
   }
 
   /**

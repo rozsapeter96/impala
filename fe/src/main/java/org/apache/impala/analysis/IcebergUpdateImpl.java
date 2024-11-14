@@ -20,7 +20,6 @@ package org.apache.impala.analysis;
 import static org.apache.impala.analysis.DmlStatementBase.createSlotRef;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,9 +31,10 @@ import org.apache.impala.catalog.IcebergColumn;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.planner.DataSink;
-import org.apache.impala.planner.IcebergBufferedDeleteSink;
 import org.apache.impala.planner.MultiDataSink;
 import org.apache.impala.planner.TableSink;
+import org.apache.impala.planner.TableSink.Op;
+import org.apache.impala.planner.TableSink.TableSinkArgs;
 import org.apache.impala.thrift.TSortingOrder;
 
 import com.google.common.base.Preconditions;
@@ -176,12 +176,12 @@ public class IcebergUpdateImpl extends IcebergModifyImpl {
     // analyze() must have been called before.
     Preconditions.checkState(modifyStmt_.table_ instanceof FeIcebergTable);
 
+    TableSinkArgs args = TableSinkArgs.withDeleteTableId(deleteTableId_);
+    args.maxTableSinks = modifyStmt_.maxTableSinks_;
     TableSink insertSink = TableSink.create(modifyStmt_.table_, TableSink.Op.INSERT,
-        insertPartitionKeyExprs_, insertResultExprs_, Collections.emptyList(), false,
-        false, new Pair<>(sortColumns_, sortingOrder_), -1, null,
-        modifyStmt_.maxTableSinks_);
-    TableSink deleteSink = new IcebergBufferedDeleteSink(
-        icePosDelTable_, deletePartitionKeyExprs_, deleteResultExprs_, deleteTableId_);
+        insertPartitionKeyExprs_, insertResultExprs_, args);
+    TableSink deleteSink = TableSink.create(icePosDelTable_, Op.DELETE,
+        deletePartitionKeyExprs_, deleteResultExprs_, args);
 
     MultiDataSink ret = new MultiDataSink();
     ret.addDataSink(insertSink);

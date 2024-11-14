@@ -32,6 +32,7 @@ import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.planner.DataSink;
 import org.apache.impala.planner.TableSink;
+import org.apache.impala.planner.TableSink.TableSinkArgs;
 import org.apache.impala.rewrite.ExprRewriter;
 import org.apache.impala.thrift.TIcebergOptimizationMode;
 import org.apache.impala.thrift.TSortingOrder;
@@ -198,11 +199,9 @@ public class OptimizeStmt extends DmlStatementBase {
   }
 
   public DataSink createDataSink() {
-    TableSink tableSink = TableSink.create(table_, TableSink.Op.INSERT,
-        partitionKeyExprs_, resultExprs_, new ArrayList<>(), false, false,
-        new Pair<>(sortColumns_, sortingOrder_), -1, null,
-        maxTableSinks_);
-    return tableSink;
+    TableSinkArgs args = TableSinkArgs.withMaxTableSinks(maxTableSinks_);
+    return TableSink.create(table_, TableSink.Op.INSERT,
+        partitionKeyExprs_, resultExprs_, args);
   }
 
   private void selectFiles(FeIcebergTable iceTable) throws AnalysisException {

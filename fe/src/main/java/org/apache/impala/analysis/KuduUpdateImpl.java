@@ -18,10 +18,9 @@
 package org.apache.impala.analysis;
 
 import org.apache.impala.catalog.FeKuduTable;
-import org.apache.impala.common.Pair;
 import org.apache.impala.planner.DataSink;
 import org.apache.impala.planner.TableSink;
-import org.apache.impala.thrift.TSortingOrder;
+import org.apache.impala.planner.TableSink.TableSinkArgs;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -35,10 +34,11 @@ public class KuduUpdateImpl extends KuduModifyImpl {
   public DataSink createDataSink() {
     // analyze() must have been called before.
     Preconditions.checkState(modifyStmt_.table_ instanceof FeKuduTable);
+    TableSinkArgs args = TableSinkArgs.withMaxTableSinks(modifyStmt_.maxTableSinks_);
+    args.referencedColumns = getReferencedColumns();
+    args.kuduTxnToken = modifyStmt_.getKuduTransactionToken();
     DataSink dataSink = TableSink.create(modifyStmt_.table_, TableSink.Op.UPDATE,
-        ImmutableList.<Expr>of(), sourceStmt_.getResultExprs(), getReferencedColumns(),
-        false, false, new Pair<>(ImmutableList.<Integer>of(), TSortingOrder.LEXICAL), -1,
-        modifyStmt_.getKuduTransactionToken(), 0);
+        ImmutableList.of(), sourceStmt_.getResultExprs(), args);
     Preconditions.checkState(!getReferencedColumns().isEmpty());
     return dataSink;
   }

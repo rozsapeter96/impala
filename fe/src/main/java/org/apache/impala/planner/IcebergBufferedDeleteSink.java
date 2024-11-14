@@ -39,11 +39,6 @@ public class IcebergBufferedDeleteSink extends TableSink {
   protected final List<Expr> partitionKeyExprs_;
 
   public IcebergBufferedDeleteSink(FeIcebergTable targetTable,
-      List<Expr> partitionKeyExprs, List<Expr> outputExprs) {
-    this(targetTable, partitionKeyExprs, outputExprs, 0);
-  }
-
-  public IcebergBufferedDeleteSink(FeIcebergTable targetTable,
       List<Expr> partitionKeyExprs, List<Expr> outputExprs,
       int deleteTableId) {
     super(targetTable, Op.DELETE, outputExprs);

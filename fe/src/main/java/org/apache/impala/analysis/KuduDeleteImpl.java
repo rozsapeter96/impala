@@ -18,13 +18,11 @@
 package org.apache.impala.analysis;
 
 import org.apache.impala.catalog.FeKuduTable;
-import org.apache.impala.common.Pair;
 import org.apache.impala.planner.DataSink;
 import org.apache.impala.planner.TableSink;
-import org.apache.impala.thrift.TSortingOrder;
+import org.apache.impala.planner.TableSink.TableSinkArgs;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 
 import java.util.Collections;
 
@@ -37,12 +35,12 @@ public class KuduDeleteImpl extends KuduModifyImpl {
   public DataSink createDataSink() {
     // analyze() must have been called before.
     Preconditions.checkState(modifyStmt_.table_ instanceof FeKuduTable);
+    TableSinkArgs args = TableSinkArgs.withMaxTableSinks(modifyStmt_.maxTableSinks_);
+    args.referencedColumns = getReferencedColumns();
+    args.kuduTxnToken = modifyStmt_.getKuduTransactionToken();
     TableSink tableSink = TableSink.create(modifyStmt_.table_, TableSink.Op.DELETE,
-        Collections.emptyList(), resultExprs_, getReferencedColumns(), false, false,
-        new Pair<>(ImmutableList.<Integer>of(), TSortingOrder.LEXICAL), -1,
-        modifyStmt_.getKuduTransactionToken(),
-        modifyStmt_.maxTableSinks_);
-        Preconditions.checkState(!getReferencedColumns().isEmpty());
+        Collections.emptyList(), resultExprs_, args);
+    Preconditions.checkState(!getReferencedColumns().isEmpty());
     return tableSink;
   }
 }

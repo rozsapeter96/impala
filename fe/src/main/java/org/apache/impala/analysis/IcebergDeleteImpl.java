@@ -22,14 +22,12 @@ import java.util.List;
 import org.apache.iceberg.TableProperties;
 import org.apache.impala.catalog.FeIcebergTable;
 import org.apache.impala.common.AnalysisException;
-import org.apache.impala.common.Pair;
 import org.apache.impala.planner.DataSink;
-import org.apache.impala.planner.IcebergBufferedDeleteSink;
 import org.apache.impala.planner.TableSink;
-import org.apache.impala.thrift.TSortingOrder;
+import org.apache.impala.planner.TableSink.Op;
+import org.apache.impala.planner.TableSink.TableSinkArgs;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import org.apache.impala.util.ExprUtil;
 
 public class IcebergDeleteImpl extends IcebergModifyImpl {
@@ -73,8 +71,8 @@ public class IcebergDeleteImpl extends IcebergModifyImpl {
   @Override
   public DataSink createDataSink() {
     Preconditions.checkState(modifyStmt_.table_ instanceof FeIcebergTable);
-    return new IcebergBufferedDeleteSink(icePosDelTable_, deletePartitionKeyExprs_,
-        deleteResultExprs_);
+    return TableSink.create(icePosDelTable_, Op.DELETE, deletePartitionKeyExprs_,
+        deleteResultExprs_, new TableSinkArgs());
   }
 
   String getModifyMode() {
