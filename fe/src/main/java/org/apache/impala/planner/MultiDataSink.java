@@ -22,6 +22,7 @@ import java.util.List;
 
 import org.apache.impala.analysis.Expr;
 
+import org.apache.impala.planner.TableSink.HasQuantityLimit;
 import org.apache.impala.thrift.TDataSink;
 import org.apache.impala.thrift.TDataSinkType;
 import org.apache.impala.thrift.TExplainLevel;
@@ -35,7 +36,7 @@ import org.apache.impala.thrift.TQueryOptions;
  * subset of columns than other data sinks. One example is Iceberg UPDATEs, which
  * insert records to data files and delete files simultaneously.
  */
-public class MultiDataSink extends DataSink {
+public class MultiDataSink extends DataSink implements HasQuantityLimit {
   protected List<DataSink> dataSinks_ = new ArrayList<>();
 
   public MultiDataSink() {}
@@ -123,5 +124,27 @@ public class MultiDataSink extends DataSink {
   public void computeRowConsumptionAndProductionToCost() {
     super.computeRowConsumptionAndProductionToCost();
     fragment_.setFixedInstanceCount(fragment_.getNumInstances());
+  }
+
+  @Override
+  public int getNumNodes() {
+    int numNodes = getFragment().getPlanRoot().getNumNodes();
+    for (DataSink sink : dataSinks_) {
+      if (sink instanceof HasQuantityLimit) {
+        numNodes = Math.min(((HasQuantityLimit) sink).getNumNodes(), numNodes);
+      }
+    }
+    return numNodes;
+  }
+
+  @Override
+  public int getNumInstances() {
+    int numInstances = getFragment().getPlanRoot().getNumInstances();
+    for (DataSink sink : dataSinks_) {
+      if (sink instanceof HasQuantityLimit) {
+        numInstances = Math.min(((HasQuantityLimit) sink).getNumInstances(), numInstances);
+      }
+    }
+    return numInstances;
   }
 }

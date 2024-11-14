@@ -30,6 +30,7 @@ import org.apache.impala.catalog.FeIcebergTable;
 import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.HdfsFileFormat;
 import org.apache.impala.common.Pair;
+import org.apache.impala.planner.TableSink.HasQuantityLimit;
 import org.apache.impala.thrift.TDataSink;
 import org.apache.impala.thrift.TDataSinkType;
 import org.apache.impala.thrift.TExplainLevel;
@@ -52,7 +53,7 @@ import org.slf4j.LoggerFactory;
  *
  * TODO(vercegovac): rename to FsTableSink
  */
-public class HdfsTableSink extends TableSink {
+public class HdfsTableSink extends TableSink implements HasQuantityLimit {
   private final static Logger LOG = LoggerFactory.getLogger(HdfsTableSink.class);
 
   // The name of the table property that sets the parameters of writing Parquet Bloom
@@ -398,14 +399,15 @@ public class HdfsTableSink extends TableSink {
    * run on. This is based on the number of nodes set for the plan root and has an
    * upper limit set by the MAX_FS_WRITERS query option.
    */
+  @Override
   public int getNumNodes() {
-    int num_nodes = getFragment().getPlanRoot().getNumNodes();
+    int numNodes = getFragment().getPlanRoot().getNumNodes();
     if (maxHdfsSinks_ > 0) {
       // If there are more nodes than instances where the fragment was initially
       // planned to run then, then the instances will be distributed evenly across them.
-      num_nodes = Math.min(num_nodes, getNumInstances());
+      numNodes = Math.min(numNodes, getNumInstances());
     }
-    return num_nodes;
+    return numNodes;
   }
 
   /**
@@ -413,12 +415,13 @@ public class HdfsTableSink extends TableSink {
    * will run on. This is based on the number of instances set for the plan root
    * and has an upper limit set by the MAX_FS_WRITERS query option.
    */
+  @Override
   public int getNumInstances() {
-    int num_instances = getFragment().getPlanRoot().getNumInstances();
+    int numInstances = getFragment().getPlanRoot().getNumInstances();
     if (maxHdfsSinks_ > 0) {
-      num_instances =  Math.min(num_instances, maxHdfsSinks_);
+      numInstances =  Math.min(numInstances, maxHdfsSinks_);
     }
-    return num_instances;
+    return numInstances;
   }
 
   @Override

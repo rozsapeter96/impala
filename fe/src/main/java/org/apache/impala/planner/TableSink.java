@@ -113,7 +113,7 @@ public abstract class TableSink extends DataSink {
               args.maxTableSinks, args.isResultSink);
         } else if (sinkAction == Op.DELETE) {
           sink = new IcebergBufferedDeleteSink((FeIcebergTable) table, partitionKeyExprs,
-              outputExprs, args.deleteTableId);
+              outputExprs, args.deleteTableId, args.maxTableSinks);
         } else {
           // Other SINK actions are either not supported or created directly.
           Preconditions.checkState(false);
@@ -195,5 +195,10 @@ public abstract class TableSink extends DataSink {
       args.maxTableSinks = maxTableSinks;
       return args;
     }
+  }
+
+  public interface HasQuantityLimit {
+    int getNumNodes();
+    int getNumInstances();
   }
 }

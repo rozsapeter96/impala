@@ -21,6 +21,7 @@ import org.apache.impala.analysis.DescriptorTable;
 import org.apache.impala.analysis.Expr;
 import org.apache.impala.catalog.FeIcebergTable;
 import org.apache.impala.common.ByteUnits;
+import org.apache.impala.planner.TableSink.HasQuantityLimit;
 import org.apache.impala.thrift.TDataSink;
 import org.apache.impala.thrift.TDataSinkType;
 import org.apache.impala.thrift.TExplainLevel;
@@ -31,19 +32,21 @@ import org.apache.impala.thrift.TTableSinkType;
 
 import java.util.List;
 
-public class IcebergBufferedDeleteSink extends TableSink {
+public class IcebergBufferedDeleteSink extends TableSink implements HasQuantityLimit {
 
-  final private int deleteTableId_;
+  private final int deleteTableId_;
+  private final int maxTableSinks_;
 
   // Exprs for computing the output partition(s).
   protected final List<Expr> partitionKeyExprs_;
 
   public IcebergBufferedDeleteSink(FeIcebergTable targetTable,
       List<Expr> partitionKeyExprs, List<Expr> outputExprs,
-      int deleteTableId) {
+      int deleteTableId, int maxTableSinks) {
     super(targetTable, Op.DELETE, outputExprs);
     partitionKeyExprs_ = partitionKeyExprs;
     deleteTableId_ = deleteTableId;
+    maxTableSinks_ = maxTableSinks;
   }
 
   @Override
@@ -131,5 +134,25 @@ public class IcebergBufferedDeleteSink extends TableSink {
   public void computeRowConsumptionAndProductionToCost() {
     super.computeRowConsumptionAndProductionToCost();
     fragment_.setFixedInstanceCount(fragment_.getNumInstances());
+  }
+
+  @Override
+  public int getNumNodes() {
+    int numNodes = getFragment().getPlanRoot().getNumNodes();
+    if (maxTableSinks_ > 0) {
+      // If there are more nodes than instances where the fragment was initially
+      // planned to run then, then the instances will be distributed evenly across them.
+      numNodes = Math.min(numNodes, getNumInstances());
+    }
+    return numNodes;
+  }
+
+  @Override
+  public int getNumInstances() {
+    int numInstances = getFragment().getPlanRoot().getNumInstances();
+    if (maxTableSinks_ > 0) {
+      numInstances =  Math.min(numInstances, maxTableSinks_);
+    }
+    return numInstances;
   }
 }

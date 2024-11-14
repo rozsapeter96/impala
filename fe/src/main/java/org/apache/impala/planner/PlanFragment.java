@@ -33,6 +33,7 @@ import org.apache.impala.common.TreeNode;
 import org.apache.impala.planner.JoinNode.DistributionMode;
 import org.apache.impala.planner.PlanNode.ExecPhaseResourceProfiles;
 import org.apache.impala.planner.RuntimeFilterGenerator.RuntimeFilter;
+import org.apache.impala.planner.TableSink.HasQuantityLimit;
 import org.apache.impala.thrift.TExplainLevel;
 import org.apache.impala.thrift.TPartitionType;
 import org.apache.impala.thrift.TPlanFragment;
@@ -526,13 +527,8 @@ public class PlanFragment extends TreeNode<PlanFragment> {
   public int getNumNodes() {
     if (dataPartition_ == DataPartition.UNPARTITIONED) {
       return 1;
-    } else if (sink_ instanceof JoinBuildSink) {
-      // One instance is scheduled per node, for all instances of the fragment containing
-      // the destination join node. ParallelPlanner sets the destination fragment when
-      // adding the JoinBuildSink.
-      return ((JoinBuildSink)sink_).getNumNodes();
-    } else if (sink_ instanceof HdfsTableSink) {
-      return ((HdfsTableSink)sink_).getNumNodes();
+    } else if (sink_ instanceof HasQuantityLimit) {
+      return ((HasQuantityLimit)sink_).getNumNodes();
     } else {
       return planRoot_.getNumNodes();
     }
@@ -561,13 +557,8 @@ public class PlanFragment extends TreeNode<PlanFragment> {
   public int getNumInstances() {
     if (dataPartition_ == DataPartition.UNPARTITIONED) {
       return 1;
-    } else if (sink_ instanceof JoinBuildSink) {
-      // One instance is scheduled per instance of the fragment containing the destination
-      // join. ParallelPlanner sets the destination fragment when adding the
-      // JoinBuildSink.
-      return ((JoinBuildSink)sink_).getNumInstances();
-    } else if (sink_ instanceof HdfsTableSink) {
-      return ((HdfsTableSink)sink_).getNumInstances();
+    } else if (sink_ instanceof HasQuantityLimit) {
+      return ((HasQuantityLimit)sink_).getNumInstances();
     } else {
       if (originalInstanceCount_ > -1) {
         int adjustedCount = getAdjustedInstanceCount();
