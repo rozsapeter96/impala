@@ -125,15 +125,12 @@ public class TestRESTCatalogProperties {
     Properties props = new Properties();
     props.setProperty("iceberg.rest-catalog.uri", "test-uri");
     props.setProperty("iceberg.rest-catalog.session", "none");
-    props.setProperty("iceberg.rest-catalog.vended-credentials-enabled", "false");
 
     RESTCatalogProperties restProps = new RESTCatalogProperties(props);
     Map<String, String> catProps = restProps.getCatalogProperties();
-    assertEquals(3, catProps.size());
+    assertEquals(2, catProps.size());
     assertEquals("test-uri", catProps.get(CatalogProperties.URI));
     assertEquals("none", catProps.get("iceberg.rest-catalog.session"));
-    assertEquals("false", catProps.get(
-        "iceberg.rest-catalog.vended-credentials-enabled"));
   }
 
   @Test
@@ -150,6 +147,49 @@ public class TestRESTCatalogProperties {
       return;
     }
     fail();
+  }
+
+  @Test
+  public void testCredentialsEnabled() {
+    Properties props = new Properties();
+    props.setProperty("iceberg.rest-catalog.uri", "test-uri");
+    props.setProperty("iceberg.rest-catalog.vended-credentials-enabled", "true");
+
+    RESTCatalogProperties restProps = new RESTCatalogProperties(props);
+    Map<String, String> catProps = restProps.getCatalogProperties();
+    assertEquals(4, catProps.size());
+    assertEquals("true", catProps.get("iceberg.rest-catalog.vended-credentials-enabled"));
+    assertEquals("vended-credentials",
+        catProps.get("header.X-Iceberg-Access-Delegation"));
+    // Metadata reads must go through the credential-aware FileIO.
+    assertEquals(VendedCredentialsFileIO.class.getName(),
+        catProps.get(CatalogProperties.FILE_IO_IMPL));
+  }
+
+  @Test
+  public void testCredentialsDisabled() {
+    Properties props = new Properties();
+    props.setProperty("iceberg.rest-catalog.uri", "test-uri");
+    props.setProperty("iceberg.rest-catalog.vended-credentials-enabled", "false");
+
+    RESTCatalogProperties restProps = new RESTCatalogProperties(props);
+    Map<String, String> catProps = restProps.getCatalogProperties();
+    assertEquals(2, catProps.size());
+    assertEquals("false",
+        catProps.get("iceberg.rest-catalog.vended-credentials-enabled"));
+    assertFalse(catProps.containsKey(CatalogProperties.FILE_IO_IMPL));
+  }
+
+  @Test
+  public void testCredentialsAbsent() {
+    // Omitting the flag is valid; no header is injected.
+    Properties props = new Properties();
+    props.setProperty("iceberg.rest-catalog.uri", "test-uri");
+
+    RESTCatalogProperties restProps = new RESTCatalogProperties(props);
+    Map<String, String> catProps = restProps.getCatalogProperties();
+    assertEquals(1, catProps.size());
+    assertFalse(catProps.containsKey("iceberg.rest-catalog.vended-credentials-enabled"));
   }
 
   @Test

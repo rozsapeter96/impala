@@ -698,6 +698,12 @@ struct TIcebergDropPartitionRequest {
   3: required i64 num_partitions
 }
 
+struct TCredential {
+  1: required string prefix
+  2: required map<string, string> config
+  3: optional i64 expiry_ms
+}
+
 struct TIcebergTable {
   // Iceberg file system table location
   1: required string table_location
@@ -718,6 +724,7 @@ struct TIcebergTable {
   9: optional i64 parquet_dict_page_size;
   10: optional map<string, TIcebergPartitionStats> partition_stats;
   11: optional i32 format_version = -1;
+  12: optional list<TCredential> credentials;
 }
 
 // System Table identifiers.

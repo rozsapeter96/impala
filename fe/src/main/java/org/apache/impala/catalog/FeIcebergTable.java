@@ -73,6 +73,7 @@ import org.apache.impala.analysis.TimeTravelSpec.Kind;
 import org.apache.impala.catalog.CatalogObject.ThriftObjectType;
 import org.apache.impala.catalog.iceberg.GroupedContentFiles;
 import org.apache.impala.common.AnalysisException;
+import org.apache.impala.common.Credential;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.common.PrintUtils;
@@ -113,6 +114,11 @@ public interface FeIcebergTable extends FeFsTable {
    * Return content file store.
    */
   IcebergContentFileStore getContentFileStore();
+
+  /** Credentials for accessing the files of the table. */
+  default List<Credential> getCredentials() {
+    return Collections.emptyList();
+  }
 
   /**
    * Return the partition stats from iceberg table
@@ -901,6 +907,11 @@ public interface FeIcebergTable extends FeFsTable {
       tIcebergTable.setParquet_dict_page_size(
           icebergTable.getIcebergParquetDictPageSize());
       tIcebergTable.setPartition_stats(icebergTable.getIcebergPartitionStats());
+      if (type == ThriftObjectType.DESCRIPTOR_ONLY) {
+        for (Credential cred : icebergTable.getCredentials()) {
+          tIcebergTable.addToCredentials(cred.toThrift());
+        }
+      }
       return tIcebergTable;
     }
 

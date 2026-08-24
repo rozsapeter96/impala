@@ -38,6 +38,7 @@ import org.apache.impala.catalog.FeIcebergTable;
 import org.apache.impala.catalog.IcebergContentFileStore;
 import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.catalog.local.MetaProvider.TableMetaRef;
+import org.apache.impala.common.Credential;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.thrift.TCompressionCodec;
 import org.apache.impala.thrift.THdfsPartition;
@@ -80,6 +81,10 @@ public class LocalIcebergTable extends LocalTable implements FeIcebergTable {
   private org.apache.iceberg.Table icebergApiTable_;
 
   private Map<String, TIcebergPartitionStats> partitionStats_;
+
+  // Storage credentials obtained from the REST catalog during table load. Empty for
+  // tables not served by a REST catalog or when the server did not vend.
+  private List<Credential> credentials_;
 
   /**
    * Loads the Iceberg metadata from the CatalogD then initializes a LocalIcebergTable.
@@ -171,6 +176,7 @@ public class LocalIcebergTable extends LocalTable implements FeIcebergTable {
     icebergParquetDictPageSize_ = Utils.getIcebergParquetDictPageSize(msTable);
     setIcebergTableStats();
     addVirtualColumns(ref.getVirtualColumns());
+    credentials_ = ref.getCredentials();
   }
 
   static void validateColumns(List<Column> impalaCols, List<FieldSchema> hmsCols) {
@@ -353,5 +359,10 @@ public class LocalIcebergTable extends LocalTable implements FeIcebergTable {
   @Override
   public IcebergContentFileStore getContentFileStore() {
     return fileStore_;
+  }
+
+  @Override
+  public List<Credential> getCredentials() {
+    return credentials_;
   }
 }
