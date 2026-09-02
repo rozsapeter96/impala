@@ -991,7 +991,7 @@ Status Coordinator::FinalizeHdfsDml() {
       // files or delete old files in case of INSERT OVERWRITE.
       return_status = dml_exec_state_.FinalizeHdfsInsert(*finalize_params(),
           query_ctx().client_request.query_options.s3_skip_insert_staging,
-          hdfs_table, query_profile_);
+          hdfs_table, query_profile_, query_state_);
     }
     hdfs_table->ReleaseResources();
   } else if (is_hive_acid) {

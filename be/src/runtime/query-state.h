@@ -33,6 +33,7 @@
 #include "gen-cpp/control_service.pb.h"
 #include "gutil/macros.h"
 #include "gutil/threading/thread_collision_warner.h" // for DFAKE_*
+#include "runtime/query-credentials.h"
 #include "util/counting-barrier.h"
 #include "util/spinlock.h"
 #include "util/unique-id-hash.h"
@@ -176,6 +177,11 @@ class QueryState {
     return &node_to_file_schedulings_;
   }
   UniqueIdPB GetCoordinatorBackendId() const;
+
+  /// Per-query store for vended storage credentials from Iceberg REST catalogs.
+  /// Valid for the lifetime of the QueryState.  Scan nodes register credentials here
+  /// during fragment init; callers resolve them before opening filesystem connections.
+  QueryCredentials* query_credentials() { return &query_credentials_; }
 
   /// The following getters are only valid after Init().
   ScannerMemLimiter* scanner_mem_limiter() const { return scanner_mem_limiter_; }
@@ -424,6 +430,9 @@ class QueryState {
   /// The RPC proxy used when reporting status of fragment instances to coordinator.
   /// Set in Init().
   std::unique_ptr<ControlServiceProxy> proxy_;
+
+  /// Per-query vended credential store.  Populated by scan nodes during fragment init.
+  QueryCredentials query_credentials_;
 
   /// Set in Init(). TODO: find a way not to have to copy this
   ExecQueryFInstancesRequestPB exec_rpc_params_;

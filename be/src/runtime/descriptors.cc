@@ -297,6 +297,12 @@ HdfsTableDescriptor::HdfsTableDescriptor(const TTableDescriptor& tdesc, ObjectPo
     iceberg_parquet_row_group_size_ = tdesc.icebergTable.parquet_row_group_size;
     iceberg_parquet_plain_page_size_ = tdesc.icebergTable.parquet_plain_page_size;
     iceberg_parquet_dict_page_size_ = tdesc.icebergTable.parquet_dict_page_size;
+    if (tdesc.icebergTable.__isset.credentials) {
+      storage_credentials_.reserve(tdesc.icebergTable.credentials.size());
+      for (const TCredential& cred : tdesc.icebergTable.credentials) {
+        storage_credentials_.push_back(CredentialFromThrift(cred));
+      }
+    }
   }
 }
 

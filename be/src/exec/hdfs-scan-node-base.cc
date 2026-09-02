@@ -248,6 +248,14 @@ Status HdfsScanPlanNode::ProcessScanRangesAndInitSharedState(FragmentState* stat
   // Initialize the template tuple pool.
   using namespace org::apache::impala::fb;
   shared_state_.template_pool_.reset(new MemPool(state->query_mem_tracker()));
+
+  // Register this table's vended credentials into the per-query QueryCredentials store.
+  // Storing them per-query (rather than process-globally) ensures that concurrent queries
+  // scanning the same table do not share mutable token state.  The list is empty for
+  // every table not served by a credential-vending REST catalog.
+  state->query_state()->query_credentials()->RegisterVendedCredentials(
+      hdfs_table_->database(), hdfs_table_->name(), hdfs_table_->StorageCredentials());
+
   auto& template_tuple_map_ = shared_state_.partition_template_tuple_map_;
   ObjectPool* obj_pool = shared_state_.obj_pool();
   auto& file_descs = shared_state_.file_descs_;
@@ -339,7 +347,8 @@ Status HdfsScanPlanNode::ProcessScanRangesAndInitSharedState(FragmentState* stat
           file_desc->file_format = partition_desc->file_format();
         }
         RETURN_IF_ERROR(HdfsFsCache::instance()->GetConnection(
-            native_file_path, &file_desc->fs, &fs_cache));
+            native_file_path, &file_desc->fs, &fs_cache, nullptr,
+            state->query_state()));
         shared_state_.per_type_files_[partition_desc->file_format()].push_back(file_desc);
       } else {
         // File already processed

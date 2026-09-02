@@ -75,10 +75,13 @@ add_library(Runtime
   mem-tracker.cc
   mem-pool.cc
   outbound-row-batch.cc
+  query-credentials.cc
   query-driver.cc
   query-exec-mgr.cc
   query-exec-params.cc
   query-state.cc
+  s3-conn-credentials.cc
+  storage-credential.cc
   test-env.cc
   types.cc
   raw-value.cc

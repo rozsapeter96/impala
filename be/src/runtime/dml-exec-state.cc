@@ -38,6 +38,7 @@
 #include "util/runtime-profile-counters.h"
 #include "runtime/descriptors.h"
 #include "runtime/hdfs-fs-cache.h"
+#include "runtime/query-state.h"
 #include "runtime/exec-env.h"
 #include "gen-cpp/control_service.pb.h"
 #include "gen-cpp/IcebergObjects_generated.h"
@@ -251,7 +252,7 @@ Status DeleteUnpartitionedDirData(const hdfsFS& fs_connection,
 
 Status DmlExecState::FinalizeHdfsInsert(const TFinalizeParams& params,
     bool s3_skip_insert_staging, HdfsTableDescriptor* hdfs_table,
-    RuntimeProfile* profile) {
+    RuntimeProfile* profile, QueryState* query_state) {
   lock_guard<mutex> l(lock_);
   PermissionCache permissions_cache;
   HdfsFsCache::HdfsFsMap filesystem_connection_cache;
@@ -273,7 +274,7 @@ Status DmlExecState::FinalizeHdfsInsert(const TFinalizeParams& params,
     hdfsFS partition_fs_connection;
     RETURN_IF_ERROR(HdfsFsCache::instance()->GetConnection(
         partition.second.partition_base_dir(), &partition_fs_connection,
-        &filesystem_connection_cache));
+        &filesystem_connection_cache, nullptr, query_state));
 
     // Look up the partition in the descriptor table.
     stringstream part_path_ss;

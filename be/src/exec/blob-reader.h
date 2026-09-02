@@ -33,6 +33,7 @@ namespace impala {
 
 class MemTracker;
 class ObjectPool;
+class QueryState;
 class RoaringBitmap64;
 
 namespace io {
@@ -63,10 +64,15 @@ class BlobReader {
   ///
   /// This method handles the following steps:
   /// 1. Allocates a buffer for reading the blob data
-  /// 2. Establishes an HDFS connection to the file
+  /// 2. Establishes an HDFS connection to the file, resolving the credential via
+  ///    'query_creds'/'qs' so that near-expiry tokens are refreshed inline and a
+  ///    rotated token causes a new hdfsFS to be built automatically.
   /// 3. Creates a scan range for the specified offset and length
   /// 4. Reads the data into the buffer
   /// 5. Calls Deserializer::Deserialize to parse the data into the output parameter
+  ///
+  /// 'qs' may be null for callers without a live query context; in that case the
+  /// process-global S3 credential (if any) is used as a fallback.
   ///
   /// @param request_context The IO request context for managing scan operations
   /// @param mem_tracker Memory tracker for tracking buffer allocations
@@ -75,10 +81,11 @@ class BlobReader {
   /// @param content_offset Byte offset within the file where the blob starts
   /// @param content_length Length of the blob content in bytes
   /// @param output Output parameter to store the deserialized blob data
+  /// @param qs QueryState for credential resolution and refresh (may be null)
   /// @return Status::OK() on success, error status otherwise
   Status Load(io::RequestContext* request_context, MemTracker* mem_tracker,
       ObjectPool* obj_pool, const std::string& path, int64_t content_offset,
-      int64_t content_length, OutputType* output) WARN_UNUSED_RESULT;
+      int64_t content_length, OutputType* output, QueryState* qs) WARN_UNUSED_RESULT;
 
  private:
   /// Local cache of HDFS connections (retained for the lifetime of the reader).
@@ -91,7 +98,8 @@ class BlobReader {
 template <typename OutputType, typename Deserializer>
 Status BlobReader<OutputType, Deserializer>::Load(io::RequestContext* request_context,
     MemTracker* mem_tracker, ObjectPool* obj_pool, const std::string& path,
-    int64_t content_offset, int64_t content_length, OutputType* output) {
+    int64_t content_offset, int64_t content_length, OutputType* output,
+    QueryState* qs) {
   DCHECK(request_context != nullptr);
   DCHECK(mem_tracker != nullptr);
   DCHECK(obj_pool != nullptr);
@@ -105,11 +113,11 @@ Status BlobReader<OutputType, Deserializer>::Load(io::RequestContext* request_co
         content_length, path));
   }
 
-  // Get HDFS connection
+  // Get HDFS connection, resolving (and if needed refreshing) the vended credential.
   io::ScanRange::FileInfo file_info;
   file_info.mtime = 1;
   RETURN_IF_ERROR(HdfsFsCache::instance()->GetConnection(
-      path, &file_info.fs, &fs_cache_));
+      path, &file_info.fs, &fs_cache_, nullptr, qs));
   file_info.filename = path.c_str();
 
   // Create scan range for the blob content
