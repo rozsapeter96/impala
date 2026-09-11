@@ -177,6 +177,19 @@ if target_filesystem == 'obs':
 if target_filesystem == 'ozone':
   CONFIG.update({'fs.ofs.impl': 'org.apache.hadoop.fs.ozone.RootedOzoneFileSystem'})
 
+# S3_ENDPOINT points at an S3-compatible service (e.g. the RustFS container used by the
+# Iceberg credential-vending tests). It needs an explicit endpoint and path-style access;
+# credentials are supplied separately (vended per-table, or via --s3a_*_key_cmd). Left
+# unset for real AWS S3.
+s3_endpoint = os.environ.get("S3_ENDPOINT")
+if s3_endpoint:
+  CONFIG.update({
+    'fs.s3a.endpoint': s3_endpoint,
+    'fs.s3a.path.style.access': 'true',
+    'fs.s3a.connection.ssl.enabled':
+        os.environ.get("S3_CONNECTION_SSL_ENABLED", "false"),
+  })
+
 if kerberize:
   CONFIG.update({
     'hadoop.security.authentication': 'kerberos',

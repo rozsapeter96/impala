@@ -1,0 +1,165 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Lakekeeper Iceberg REST catalog with RustFS storage and credential vending, used by
+# the Impala credential-vending tests.
+#
+# Services:
+#   rustfs     - S3-compatible object store with STS/AssumeRole (port 9100 API)
+#   lakekeeper - Iceberg REST catalog with S3 storage profile (port 8181)
+#   migrate    - runs Lakekeeper DB migrations
+#   bootstrap  - creates the test bucket, bootstraps Lakekeeper and creates the test
+#                warehouse
+#   db         - PostgreSQL metadata store for Lakekeeper (port 54322)
+#   keycloak   - OAuth2/OIDC provider for Impala → Lakekeeper auth (port 7071)
+#
+# All services use network_mode: host so that Impala (running outside Docker)
+# can reach the S3 and REST endpoints on localhost.
+
+services:
+
+  rustfs:
+    # RustFS is an Apache-2.0, MinIO-compatible object store. Its STS AssumeRole
+    # endpoint is what lets Lakekeeper vend scoped, expiring credentials.
+    image: rustfs/rustfs:1.0.0-rc.6
+    environment:
+      - RUSTFS_ADDRESS=0.0.0.0:9100
+      # The web console is not needed by the tests; keep it off (and off the
+      # default :9001 in case the flag is ignored).
+      - RUSTFS_CONSOLE_ENABLE=false
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9101
+      - RUSTFS_ACCESS_KEY=rustfs-root-user
+      - RUSTFS_SECRET_KEY=rustfs-root-password
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_OBS_LOGGER_LEVEL=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
+      interval: 2s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+    network_mode: host
+
+  lakekeeper:
+    image: ${LAKEKEEPER_TEST__SERVER_IMAGE:-quay.io/lakekeeper/catalog:latest-main}
+    pull_policy: always
+    environment:
+      - LAKEKEEPER__PG_ENCRYPTION_KEY=This-is-NOT-Secure!
+      - LAKEKEEPER__PG_DATABASE_URL_READ=postgresql://postgres:postgres@localhost:54322/postgres
+      - LAKEKEEPER__PG_DATABASE_URL_WRITE=postgresql://postgres:postgres@localhost:54322/postgres
+      - LAKEKEEPER__OPENID_PROVIDER_URI=http://localhost:7071/realms/lakekeeper-realm
+      - LAKEKEEPER__OPENID_CLIENT_ID=lakekeeper-client
+      # Move the metrics server off 9000 to avoid colliding with Keycloak's
+      # management interface (also 9000) on the shared host network.
+      - LAKEKEEPER__METRICS_PORT=9002
+      - RUST_LOG=debug
+    command: ["serve"]
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 1s
+      timeout: 10s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    network_mode: host
+
+  migrate:
+    image: ${LAKEKEEPER_TEST__SERVER_IMAGE:-quay.io/lakekeeper/catalog:latest-main}
+    pull_policy: always
+    environment:
+      - LAKEKEEPER__PG_ENCRYPTION_KEY=This-is-NOT-Secure!
+      - LAKEKEEPER__PG_DATABASE_URL_READ=postgresql://postgres:postgres@localhost:54322/postgres
+      - LAKEKEEPER__PG_DATABASE_URL_WRITE=postgresql://postgres:postgres@localhost:54322/postgres
+      - RUST_LOG=info
+    restart: "no"
+    command: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    network_mode: host
+
+  bootstrap:
+    build: .
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      lakekeeper:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    volumes:
+      - ./setup.sh:/setup.sh
+      - ./create-s3-warehouse.json:/create-s3-warehouse.json
+      - ./seed-table.py:/seed-table.py
+    network_mode: host
+    restart: "no"
+    entrypoint: /setup.sh
+
+  db:
+    image: postgres:17
+    # Host network so lakekeeper/migrate reach it at localhost:54322 without a proxy.
+    command: ["-p", "54322"]
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+      - PGPORT=54322
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -p 54322 -d postgres"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    network_mode: host
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    # Host network, listening on 7071, so host services reach it without a proxy.
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          [ -f /tmp/HealthCheck.java ] ||
+          echo "public class HealthCheck {
+            public static void main(String[] args) throws java.lang.Throwable {
+              java.net.URI uri = java.net.URI.create(args[0]);
+              System.exit(
+                  java.net.HttpURLConnection.HTTP_OK ==
+                  ((java.net.HttpURLConnection)uri.toURL().
+                      openConnection()).getResponseCode() ? 0 : 1);
+            }
+          }" > /tmp/HealthCheck.java &&
+          java /tmp/HealthCheck.java http://localhost:9000/health/live
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    command: start-dev --import-realm --http-port=7071
+    volumes:
+      - ../minicluster_lakekeeper/realm-config.json:/opt/keycloak/data/import/realm.json:ro
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    network_mode: host
