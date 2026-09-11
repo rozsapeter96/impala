@@ -237,6 +237,152 @@ iceberg.rest-catalog.uri=http://rest-catalog-server:9084</codeblock>
       </conbody>
     </concept>
 
+    <concept id="rest_catalog_credential_vending">
+      <title>Credential Vending</title>
+      <prolog>
+        <metadata>
+          <data name="Category" value="Concepts"/>
+        </metadata>
+      </prolog>
+      <conbody>
+        <p>
+          A REST Catalog server can vend short-lived, table-scoped storage credentials to
+          clients as part of the load table response, so that Impala does not need long-lived
+          object store credentials configured on every host. Impala supports credential vending
+          for tables stored on Amazon S3 and S3-compatible object stores accessed through the
+          <codeph>s3a://</codeph> filesystem.
+        </p>
+
+        <section id="enabling_credential_vending">
+          <title>Enabling Credential Vending</title>
+          <p>
+            Set the following property in the catalog configuration file. Impala then requests
+            vended credentials from the REST Catalog server on every table load:
+          </p>
+          <codeblock>iceberg.rest-catalog.vended-credentials-enabled=true</codeblock>
+          <p>
+            The REST Catalog server must also be configured to vend credentials for the
+            warehouse; refer to the documentation of your catalog server. When the server does
+            not return credentials for a table, Impala falls back to the credential resolution
+            described below, so enabling the property on a catalog that vends nothing is
+            harmless.
+          </p>
+          <p>
+            When using an S3-compatible object store (for example, MinIO), the endpoint is a
+            cluster-wide setting and is not part of the vended credential. Configure it in
+            <codeph>core-site.xml</codeph>:
+          </p>
+          <codeblock>&lt;property&gt;
+  &lt;name&gt;fs.s3a.endpoint&lt;/name&gt;
+  &lt;value&gt;http://object-store-host:9000&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;fs.s3a.path.style.access&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;</codeblock>
+        </section>
+
+        <section id="credential_precedence">
+          <title>Credential Precedence</title>
+          <p>
+            When Impala opens a connection to a filesystem, it resolves the credential for the
+            path in the following order. The first source that provides a credential wins:
+          </p>
+          <ol>
+            <li>
+              <b>Vended credential:</b> a credential vended for the table being queried whose
+              storage prefix matches the path. If several prefixes match, the longest one is
+              used.
+            </li>
+            <li>
+              <b>Process-wide S3 credential:</b> the access and secret key retrieved at startup
+              through the <codeph>--s3a_access_key_cmd</codeph> and
+              <codeph>--s3a_secret_key_cmd</codeph> impalad flags, if both are set.
+            </li>
+            <li>
+              <b>Hadoop configuration:</b> whatever credential provider chain is configured in
+              <codeph>core-site.xml</codeph>, for example static keys, instance profiles, or a
+              JCEKS credential store.
+            </li>
+          </ol>
+          <p>
+            Vended credentials are looked up by the storage prefix they were vended for.
+            Impala opens one filesystem connection per prefix and credential; concurrent
+            queries on the same table share that connection, and a refreshed credential
+            results in a new connection for the files opened after the refresh. During
+            planning, the coordinator reads table metadata through a FileIO that opens each
+            file with the credential vended for it, so no cluster-wide credential is needed
+            for metadata reads either.
+          </p>
+        </section>
+
+        <section id="credential_lifetime">
+          <title>Token Lifetime and Refresh</title>
+          <p>
+            Vended credentials are temporary and carry an expiry time. A long-running query can
+            outlive the credential it started with, so Impala refreshes vended credentials during
+            query execution:
+          </p>
+          <ul>
+            <li>
+              Before a file is opened, Impala checks the expiry of the credential matching its
+              path. If it is within <codeph>--credential_refresh_threshold_s</codeph> seconds
+              of expiring (default 300), the credential is refreshed first and the file is
+              opened with the refreshed one.
+            </li>
+            <li>
+              The refresh is performed through the query coordinator, which asks the REST
+              Catalog server for the table's current credentials and returns them to the
+              executor. A single refresh is issued per table even when many threads request it
+              at the same time, and a table is refreshed at most once per
+              <codeph>--credential_refresh_min_interval_s</codeph> seconds (default 60).
+            </li>
+            <li>
+              A refreshed credential is used by every file opened afterwards. Reads that are
+              already in progress continue on the connection they were opened with.
+            </li>
+            <li>
+              If a refresh fails, Impala logs a warning and keeps using the existing credential
+              until it expires. Once expired, the credential is no longer used and file opens
+              fall back to the next source in the precedence list above; a later successful
+              refresh restores it.
+            </li>
+          </ul>
+          <p>
+            Configure the credential lifetime on the REST Catalog server so that it comfortably
+            exceeds the refresh threshold; otherwise every table is refreshed at the minimum
+            interval for the whole duration of a query.
+          </p>
+        </section>
+
+        <section id="credential_vending_requirements">
+          <title>Requirements and Limitations</title>
+          <ul>
+            <li>
+              Credential vending requires local catalog mode
+              (<codeph>--use_local_catalog=true</codeph>); see
+              <xref href="#rest_catalog_deployment_modes"/>.
+            </li>
+            <li>
+              Only S3 and S3-compatible storage accessed through <codeph>s3a://</codeph> is
+              supported. Credentials vended for other storage types are ignored.
+            </li>
+            <li>
+              For connections that use a vended credential, Impala replaces the
+              <codeph>fs.s3a.aws.credentials.provider</codeph> chain with its own provider
+              followed by the Hadoop default chain. A custom provider chain configured in
+              <codeph>core-site.xml</codeph> still applies to all other connections.
+            </li>
+            <li>
+              Vended credentials apply to scans and to the metadata reads performed during
+              planning. Spilling to S3 keeps using the process-wide or Hadoop configuration
+              credential.
+            </li>
+          </ul>
+        </section>
+      </conbody>
+    </concept>
+
     <concept id="unsupported_features">
       <title>Limitations and Unsupported Features</title>
       <prolog>
@@ -250,11 +396,6 @@ iceberg.rest-catalog.uri=http://rest-catalog-server:9084</codeblock>
             The following Iceberg REST Catalog features are not currently supported:
           </p>
           <ul>
-            <li>
-              <b>Vended Credentials:</b> The <codeph>vended-credentials-enabled</codeph> property
-              must be set to <codeph>false</codeph>. Impala does not support delegated credential
-              management from the REST Catalog server.
-            </li>
             <li>
               <b>User Sessions:</b> Only <codeph>NONE</codeph> session type is supported. Per-user
               session isolation is not available.
