@@ -51,6 +51,7 @@ add_library(Runtime
   coordinator.cc
   coordinator-backend-state.cc
   coordinator-backend-resource-state.cc
+  query-credentials.cc
   datetime-iso-sql-format-parser.cc
   datetime-iso-sql-format-tokenizer.cc
   datetime-parser-common.cc

@@ -33,6 +33,7 @@
 
 #include "gen-cpp/CatalogObjects_types.h"
 #include "gen-cpp/Types_types.h"
+#include "runtime/query-credentials.h"
 
 namespace llvm {
   class Constant;
@@ -56,6 +57,9 @@ class TExpr;
 class TSlotDescriptor;
 class TTableDescriptor;
 class TTupleDescriptor;
+class TCredential;
+
+CredentialEntry CredentialEntryFromThrift(const TCredential& cred);
 
 /// A path into a table schema (e.g. a vector of ColumnTypes) pointing to a particular
 /// column/field. The i-th element of the path is the ordinal position of the column/field
@@ -530,6 +534,12 @@ class HdfsTableDescriptor : public TableDescriptor {
     return iceberg_format_version_;
   }
 
+  /// Per-table credentials vended by an Iceberg REST catalog, registered with
+  /// QueryCredentials at scan init. Empty for other tables.
+  const std::vector<CredentialEntry>& StorageCredentials() const {
+    return storage_credentials_;
+  }
+
   virtual std::string DebugString() const;
 
  protected:
@@ -553,6 +563,8 @@ class HdfsTableDescriptor : public TableDescriptor {
   int64_t iceberg_parquet_dict_page_size_;
   int32_t iceberg_spec_id_;
   int32_t iceberg_format_version_;
+  /// Per-table vended credentials; empty for non-REST-catalog tables.
+  std::vector<CredentialEntry> storage_credentials_;
 };
 
 class HBaseTableDescriptor : public TableDescriptor {

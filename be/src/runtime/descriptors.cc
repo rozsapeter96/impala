@@ -297,7 +297,20 @@ HdfsTableDescriptor::HdfsTableDescriptor(const TTableDescriptor& tdesc, ObjectPo
     iceberg_parquet_row_group_size_ = tdesc.icebergTable.parquet_row_group_size;
     iceberg_parquet_plain_page_size_ = tdesc.icebergTable.parquet_plain_page_size;
     iceberg_parquet_dict_page_size_ = tdesc.icebergTable.parquet_dict_page_size;
+    if (tdesc.icebergTable.__isset.credentials) {
+      for (const TCredential& cred : tdesc.icebergTable.credentials) {
+        storage_credentials_.push_back(CredentialEntryFromThrift(cred));
+      }
+    }
   }
+}
+
+CredentialEntry CredentialEntryFromThrift(const TCredential& cred) {
+  CredentialEntry entry;
+  entry.prefix = cred.prefix;
+  entry.config = cred.config;
+  entry.expiry_ms = cred.__isset.expires_at_ms ? cred.expires_at_ms : 0;
+  return entry;
 }
 
 void HdfsTableDescriptor::ReleaseResources() {
