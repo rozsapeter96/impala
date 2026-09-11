@@ -202,6 +202,14 @@ class Frontend {
   Status GetHadoopGroups(const TGetHadoopGroupsRequest& request,
       TGetHadoopGroupsResponse* response);
 
+  /// Fetches fresh storage credentials for the Iceberg REST-catalog table identified by
+  /// 'table_db'/'table_name' by reloading the table through the frontend. On success
+  /// '*response' lists the credentials the catalog vended (possibly none). Called by
+  /// the coordinator's ControlService::FetchCredentials handler, which forwards them
+  /// to the requesting node.
+  Status FetchCredentials(const std::string& table_db,
+      const std::string& table_name, TFetchCredentialsResponse* response);
+
   /// Loads a single file or set of files into a table or partition. Saves the RPC
   /// response in the TLoadDataResp output parameter. Returns OK if the operation
   /// completed successfully.
@@ -284,6 +292,7 @@ class Frontend {
   jmethodID get_hadoop_config_id_;  // JniFrontend.getHadoopConfig(byte[])
   jmethodID get_hadoop_configs_id_;  // JniFrontend.getAllHadoopConfigs()
   jmethodID get_hadoop_groups_id_;  // JniFrontend.getHadoopGroups()
+  jmethodID fetch_credentials_id_; // JniFrontend.fetchCredentials(byte[])
   jmethodID check_config_id_; // JniFrontend.checkConfiguration()
   jmethodID update_catalog_cache_id_; // JniFrontend.updateCatalogCache(byte[][])
   jmethodID update_membership_id_; // JniFrontend.updateExecutorMembership()

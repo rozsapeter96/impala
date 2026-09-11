@@ -213,6 +213,20 @@ public class IcebergMetaProvider implements MetaProvider {
     }
   }
 
+  /**
+   * Returns all storage credentials for the given table by issuing a fresh REST
+   * loadTable (which also registers them). Returns an empty list if the table vends no
+   * credentials. The backend limits how often this is called per table.
+   */
+  @Override
+  public List<Credential> fetchCredentials(String dbName, String tableName)
+      throws TException {
+    LOG.debug("Issuing REST loadTable to refresh credentials for {}.{}.", dbName,
+        tableName);
+    Pair<Table, TableMetaRef> loaded = loadTable(dbName, tableName);
+    return ((TableMetaRefImpl) loaded.second).getCredentials();
+  }
+
   private StorageDescriptor createStorageDescriptor(org.apache.iceberg.Table tbl)
       throws ImpalaRuntimeException {
     StorageDescriptor sd = new StorageDescriptor();

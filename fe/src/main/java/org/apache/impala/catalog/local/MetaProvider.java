@@ -97,6 +97,17 @@ public interface MetaProvider {
 
   Pair<Table, TableMetaRef> getTableIfPresent(String dbName, String tableName);
 
+  /**
+   * Returns all fresh storage credentials for the named table by issuing a REST
+   * loadTable, used to refresh near-expiry Iceberg vended credentials during query
+   * execution. Returns an empty list when this provider does not vend credentials (the
+   * default). Storm absorption is handled on the executor side; no caching here.
+   */
+  default List<Credential> fetchCredentials(String dbName, String tableName)
+      throws TException {
+    return Collections.emptyList();
+  }
+
   String loadNullPartitionKeyValue()
       throws MetaException, TException;
 

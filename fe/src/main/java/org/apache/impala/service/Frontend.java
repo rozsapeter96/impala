@@ -155,6 +155,7 @@ import org.apache.impala.catalog.iceberg.IcebergMetadataTable;
 import org.apache.impala.catalog.paimon.FePaimonTable;
 import org.apache.impala.catalog.paimon.FeShowFileStmtSupport;
 import org.apache.impala.common.AnalysisException;
+import org.apache.impala.common.Credential;
 import org.apache.impala.common.UnsupportedFeatureException;
 import org.apache.impala.common.UserCancelledException;
 import org.apache.impala.common.FileSystemUtil;
@@ -204,6 +205,8 @@ import org.apache.impala.thrift.TDescribeResult;
 import org.apache.impala.thrift.TErrorCode;
 import org.apache.impala.thrift.TDescribeTableParams;
 import org.apache.impala.thrift.TExecRequest;
+import org.apache.impala.thrift.TFetchCredentialsRequest;
+import org.apache.impala.thrift.TFetchCredentialsResponse;
 import org.apache.impala.thrift.TExecutorGroupSet;
 import org.apache.impala.thrift.TExplainResult;
 import org.apache.impala.thrift.TFinalizeParams;
@@ -643,6 +646,23 @@ public class Frontend {
           getCatalog().getAuthPolicy()));
     }
     return resp;
+  }
+
+  /**
+   * Fetches fresh storage credentials for an Iceberg REST-catalog table. Called over JNI
+   * by the coordinator when a backend reports a near-expiry vended credential. Reloads
+   * the table from the catalog and returns all of its credentials; the list is empty
+   * when the catalog vended none. Failures propagate so the backend sees the cause.
+   */
+  public TFetchCredentialsResponse fetchCredentials(TFetchCredentialsRequest request)
+      throws ImpalaException {
+    TFetchCredentialsResponse response = new TFetchCredentialsResponse();
+    String db = request.getTable_db();
+    String tbl = request.getTable_name();
+    List<Credential> creds = getCatalog().fetchCredentials(db, tbl);
+    for (Credential cred : creds) response.addToCredentials(cred.toThrift());
+    LOG.info("Fetched {} credential(s) for table {}.{}.", creds.size(), db, tbl);
+    return response;
   }
 
   /**

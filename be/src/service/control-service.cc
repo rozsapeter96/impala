@@ -33,12 +33,14 @@
 #include "runtime/query-exec-mgr.h"
 #include "runtime/query-state.h"
 #include "service/client-request-state.h"
+#include "service/frontend.h"
 #include "service/impala-server.h"
 #include "util/debug-util.h"
 #include "util/memory-metrics.h"
 #include "util/parse-util.h"
 #include "util/uid-util.h"
 
+#include "gen-cpp/Frontend_types.h"
 #include "gen-cpp/ImpalaInternalService_types.h"
 #include "gen-cpp/RuntimeProfile_types.h"
 #include "gen-cpp/control_service.pb.h"
@@ -55,6 +57,11 @@ DEFINE_int64(control_service_queue_mem_limit_floor_bytes, 50L * 1024L * 1024L,
     "Lower bound on --control_service_queue_mem_limit in bytes. If "
     "--control_service_queue_mem_limit works out to be less than this amount, "
     "this value is used instead");
+DEFINE_int32(credential_fetch_threads, 4, "Number of threads a coordinator uses to "
+    "serve FetchCredentials RPCs, i.e. to reload Iceberg REST tables for refreshed "
+    "vended credentials. Kept separate from the ControlService threads so a slow "
+    "catalog cannot stall status reporting.");
+
 DEFINE_int32(control_service_num_svc_threads, 0, "Number of threads for processing "
     "control service's RPCs. if left at default value 0, it will be set to number of "
     "CPU cores. Set it to a positive value to change from the default.");
@@ -85,6 +92,12 @@ ControlService::ControlService(MetricGroup* metric_group)
 }
 
 Status ControlService::Init() {
+  fetch_credentials_pool_.reset(new ThreadPool<FetchCredentialsWork>("control-service",
+      "fetch-credentials", FLAGS_credential_fetch_threads, 1024,
+      [this](int thread_id, const FetchCredentialsWork& work) {
+        DoFetchCredentials(thread_id, work);
+      }));
+  RETURN_IF_ERROR(fetch_credentials_pool_->Init());
   int num_svc_threads = FLAGS_control_service_num_svc_threads > 0 ?
       FLAGS_control_service_num_svc_threads : CpuInfo::num_cores();
   RpcMgr* rpc_mgr = ExecEnv::GetInstance()->rpc_mgr();
@@ -277,5 +290,91 @@ void ControlService::KillQuery(const KillQueryRequestPB* request,
   Status status = ExecEnv::GetInstance()->impala_server()->KillQuery(
       query_id, request->requesting_user(), request->is_admin());
   RespondAndReleaseRpc(vector{status}, response, rpc_context);
+}
+
+void ControlService::FetchCredentials(const FetchCredentialsRequestPB* request,
+    FetchCredentialsResponsePB* response, RpcContext* rpc_context) {
+  // Validate that the caller is a participant of a live query on this coordinator and
+  // that the query actually reads the table, so that a node cannot use the coordinator
+  // as a credential oracle for arbitrary tables. 'query_handle' pins the query in the
+  // registry for as long as the (potentially slow) catalog round trip is in flight.
+  const TUniqueId query_id = ProtoToQueryId(request->query_id());
+  VLOG(2) << "FetchCredentials(): " << request->table_db() << "." << request->table_name()
+          << " (query_id=" << PrintId(query_id) << ") from "
+          << rpc_context->remote_address().ToString();
+  QueryHandle query_handle;
+  Status status =
+      ExecEnv::GetInstance()->impala_server()->GetQueryHandle(query_id, &query_handle);
+  if (!status.ok()) {
+    const string& err = Substitute("FetchCredentials(): request for unknown query ID "
+        "(probably closed or cancelled): $0 remote host=$1",
+        PrintId(query_id), rpc_context->remote_address().ToString());
+    VLOG(1) << err;
+    RespondAndReleaseRpc(Status::Expected(err), response, rpc_context);
+    return;
+  }
+  bool references_table = false;
+  for (const TTableName& t : query_handle->tables()) {
+    if (t.db_name == request->table_db() && t.table_name == request->table_name()) {
+      references_table = true;
+      break;
+    }
+  }
+  if (!references_table) {
+    const string& err = Substitute("FetchCredentials(): query $0 does not reference "
+        "table $1.$2 remote host=$3", PrintId(query_id), request->table_db(),
+        request->table_name(), rpc_context->remote_address().ToString());
+    LOG(WARNING) << err;
+    RespondAndReleaseRpc(Status::Expected(err), response, rpc_context);
+    return;
+  }
+  FetchCredentialsWork work;
+  work.request = request;
+  work.response = response;
+  work.rpc_context = rpc_context;
+  work.query_handle = query_handle;
+  // Never block the service thread: when the pool's queue is full (the catalog is slow
+  // and every backend is retrying), reject the request and let the backend retry after
+  // --credential_refresh_min_interval_s rather than stalling ReportExecStatus() and
+  // CancelQueryFInstances() behind a stuck catalog.
+  if (!fetch_credentials_pool_->Offer(std::move(work), /*timeout_millis=*/0)) {
+    RespondAndReleaseRpc(Status::Expected("FetchCredentials(): the coordinator's "
+        "credential fetch queue is full or shutting down; retry later"),
+        response, rpc_context);
+  }
+}
+
+void ControlService::DoFetchCredentials(int thread_id, const FetchCredentialsWork& work) {
+  DebugActionNoFail(FLAGS_debug_actions, "FETCH_CREDENTIALS_DELAY");
+  const FetchCredentialsRequestPB* request = work.request;
+  FetchCredentialsResponsePB* response = work.response;
+  RpcContext* rpc_context = work.rpc_context;
+
+  Frontend* frontend = ExecEnv::GetInstance()->frontend();
+  DCHECK(frontend != nullptr);
+  TFetchCredentialsResponse fe_response;
+  Status status = frontend->FetchCredentials(
+      request->table_db(), request->table_name(), &fe_response);
+  if (!status.ok()) {
+    RespondAndReleaseRpc(status, response, rpc_context);
+    return;
+  }
+  if (fe_response.__isset.credentials && !fe_response.credentials.empty()) {
+    int sidecar_idx = -1;
+    int64_t sidecar_len = 0;
+    status = SetFaststringSidecar(fe_response, rpc_context, &sidecar_idx, &sidecar_len);
+    if (!status.ok()) {
+      RespondAndReleaseRpc(status, response, rpc_context);
+      return;
+    }
+    response->set_thrift_credential_sidecar_idx(sidecar_idx);
+    VLOG(2) << "FetchCredentials(): vended " << fe_response.credentials.size()
+            << " credential(s) for " << request->table_db() << "."
+            << request->table_name() << " in sidecar " << sidecar_idx;
+  } else {
+    VLOG(2) << "FetchCredentials(): no credentials vended for " << request->table_db()
+            << "." << request->table_name();
+  }
+  RespondAndReleaseRpc(Status::OK(), response, rpc_context);
 }
 }

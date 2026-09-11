@@ -42,6 +42,7 @@ import org.apache.impala.catalog.Function.CompareMode;
 import org.apache.impala.catalog.HdfsCachePool;
 import org.apache.impala.catalog.PartitionNotFoundException;
 import org.apache.impala.catalog.PrunablePartition;
+import org.apache.impala.common.Credential;
 import org.apache.impala.common.InternalException;
 import org.apache.impala.thrift.TCatalogObject;
 import org.apache.impala.thrift.TCatalogObjectType;
@@ -161,6 +162,20 @@ public class LocalCatalog implements FeCatalog {
       // pass
     }
     return null;
+  }
+
+  @Override
+  public List<Credential> fetchCredentials(String dbName, String tableName)
+      throws InternalException {
+    // Delegate to the MetaProvider (through any decorators). Only the Iceberg REST
+    // provider vends credentials; other providers return an empty list via the default.
+    try {
+      return metaProvider_.fetchCredentials(dbName, tableName);
+    } catch (TException e) {
+      throw new InternalException(String.format(
+          "Failed to fetch credentials for %s.%s: %s", dbName, tableName,
+          e.getMessage()), e);
+    }
   }
 
   @Override

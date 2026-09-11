@@ -1157,3 +1157,19 @@ struct TCivilTime {
   5: required i32 minute
   6: required i32 second
 }
+
+// Request to refresh the storage credentials of an Iceberg REST-catalog table. Used by
+// the backend QueryCredentials to refresh near-expiry credentials.
+// 'table_db'/'table_name' identify the owning table; the frontend reloads it from the
+// REST catalog to obtain fresh credentials.
+struct TFetchCredentialsRequest {
+  // Database/namespace and name of the Iceberg table that owns the credential.
+  1: required string table_db
+  2: required string table_name
+}
+
+// Response carrying all refreshed credentials for the table. 'credentials' is empty
+// when the catalog could not vend credentials (e.g. table not found or vending disabled).
+struct TFetchCredentialsResponse {
+  1: optional list<CatalogObjects.TCredential> credentials
+}

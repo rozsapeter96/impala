@@ -40,6 +40,7 @@ import org.apache.impala.catalog.Function;
 import org.apache.impala.catalog.HdfsCachePool;
 import org.apache.impala.catalog.SqlConstraints;
 import org.apache.impala.catalog.local.LocalIcebergTable.TableParams;
+import org.apache.impala.common.Credential;
 import org.apache.impala.common.Pair;
 import org.apache.impala.thrift.TBriefTableMeta;
 import org.apache.impala.thrift.TNetworkAddress;
@@ -129,6 +130,27 @@ public class MultiMetaProvider implements MetaProvider {
       throws TException {
     return tryAllProviders(
         unchecked(provider -> provider.loadTable(dbName, tableName)));
+  }
+
+  @Override
+  public List<Credential> fetchCredentials(String dbName, String tableName)
+      throws TException {
+    // Providers that do not vend credentials return an empty list; keep looking until
+    // one returns credentials for the table. A provider that does not own the table
+    // fails its REST loadTable with an unchecked Iceberg exception (e.g.
+    // NoSuchTableException), which must not stop the search any more than a
+    // TException does, so every exception is collected and the next provider tried.
+    Map<String, Exception> exceptions = new HashMap<>();
+    for (MetaProvider provider : getAllProviders()) {
+      try {
+        List<Credential> creds = provider.fetchCredentials(dbName, tableName);
+        if (!creds.isEmpty()) return creds;
+      } catch (Exception e) {
+        exceptions.put(provider.getURI(), e);
+      }
+    }
+    handleExceptions(exceptions);
+    return Collections.emptyList();
   }
 
   @Override

@@ -33,6 +33,7 @@ import org.apache.impala.catalog.Function;
 import org.apache.impala.catalog.HdfsCachePool;
 import org.apache.impala.catalog.SqlConstraints;
 import org.apache.impala.catalog.local.LocalIcebergTable.TableParams;
+import org.apache.impala.common.Credential;
 import org.apache.impala.common.Pair;
 import org.apache.impala.thrift.TBriefTableMeta;
 import org.apache.impala.thrift.TNetworkAddress;
@@ -98,6 +99,12 @@ public abstract class MetaProviderDecorator implements MetaProvider {
 
   public Pair<Table, TableMetaRef> getTableIfPresent(String dbName, String tableName) {
     return this.decoratedObj_.getTableIfPresent(dbName, tableName);
+  }
+
+  @Override
+  public List<Credential> fetchCredentials(String dbName, String tableName)
+      throws TException {
+    return this.decoratedObj_.fetchCredentials(dbName, tableName);
   }
 
   public String loadNullPartitionKeyValue()

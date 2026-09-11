@@ -16,11 +16,13 @@
 // under the License.
 package org.apache.impala.catalog;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.authorization.AuthorizationPolicy;
+import org.apache.impala.common.Credential;
 import org.apache.impala.common.InternalException;
 import org.apache.impala.thrift.TCatalogObject;
 import org.apache.impala.thrift.TGetPartitionStatsResponse;
@@ -51,6 +53,17 @@ public interface FeCatalog {
 
   /** @see Catalog#getTableNoThrow(String, String) */
   FeTable getTableNoThrow(String dbName, String tableName);
+
+  /**
+   * Returns all fresh storage credentials for the named table, used to refresh
+   * near-expiry Iceberg vended credentials during query execution.  Returns an empty
+   * list when the catalog does not vend credentials (the common case for non-REST
+   * catalogs).  Default: empty list.
+   */
+  default List<Credential> fetchCredentials(String dbName, String tableName)
+      throws InternalException {
+    return Collections.emptyList();
+  }
 
   /** @see Catalog#getTableIfCached(String, String) */
   FeTable getTableIfCached(String dbName, String tableName)

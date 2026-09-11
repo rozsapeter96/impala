@@ -178,6 +178,12 @@ class QueryState {
   }
   UniqueIdPB GetCoordinatorBackendId() const;
 
+  /// Returns the RPC proxy to the coordinator's ControlService (the same link used for
+  /// ReportExecStatus). Only valid after Init(). The returned proxy is owned by this
+  /// QueryState; callers must hold a backend resource refcnt (e.g. via ScopedRef) for the
+  /// duration of any RPC. ControlServiceProxy is safe for concurrent RPC calls.
+  ControlServiceProxy* coord_proxy() const { return proxy_.get(); }
+
   /// Per-query store for vended storage credentials from Iceberg REST catalogs.
   /// Valid for the lifetime of the QueryState.  Scan nodes register credentials here
   /// during fragment init; callers resolve them before opening filesystem connections.

@@ -75,6 +75,8 @@ import org.apache.impala.thrift.TGetDbsResult;
 import org.apache.impala.thrift.TGetFunctionsParams;
 import org.apache.impala.thrift.TGetFunctionsResult;
 import org.apache.impala.thrift.TGetHadoopConfigRequest;
+import org.apache.impala.thrift.TFetchCredentialsRequest;
+import org.apache.impala.thrift.TFetchCredentialsResponse;
 import org.apache.impala.thrift.TGetHadoopConfigResponse;
 import org.apache.impala.thrift.TGetMetadataTablesParams;
 import org.apache.impala.thrift.TGetTableHistoryResult;
@@ -823,6 +825,21 @@ public class JniFrontend {
    */
   public byte[] getHadoopGroups(byte[] serializedRequest) throws ImpalaException {
     return JniRequestPoolService.getHadoopGroupsInternal(serializedRequest);
+  }
+
+  /** JNI wrapper for {@link Frontend#fetchCredentials}. */
+  public byte[] fetchCredentials(byte[] serializedRequest)
+      throws ImpalaException {
+    Preconditions.checkNotNull(frontend_);
+    TFetchCredentialsRequest request = new TFetchCredentialsRequest();
+    JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
+    TFetchCredentialsResponse response =
+        frontend_.fetchCredentials(request);
+    try {
+      return new TSerializer(protocolFactory_).serialize(response);
+    } catch (TException e) {
+      throw new InternalException(e.getMessage());
+    }
   }
 
   /**

@@ -498,6 +498,30 @@ message KillQueryResponsePB {
   repeated StatusPB statuses = 1;
 }
 
+// Sent to a query's coordinator to obtain a fresh storage credential for an Iceberg
+// table whose vended STS token is near expiry. All nodes route refresh through the
+// coordinator (a loopback on the coordinator itself), which owns the frontend and the
+// (single-user) REST-catalog connection. See QueryCredentials.
+message FetchCredentialsRequestPB {
+  // Identifies the query on the coordinator so it can validate that the caller is a
+  // participant of a live query before vending a credential.
+  optional UniqueIdPB query_id = 1;
+
+  // Database/namespace and name of the Iceberg table that owns the credential.
+  optional string table_db = 2;
+  optional string table_name = 3;
+}
+
+message FetchCredentialsResponsePB {
+  // Success or failure of the operation.
+  optional StatusPB status = 1;
+
+  // Index of the RPC sidecar carrying the Thrift-serialized TFetchCredentialsResponse
+  // (from Frontend.thrift) with all credentials of the table. Absent when the catalog
+  // vended none (e.g. vending disabled).
+  optional int32 thrift_credential_sidecar_idx = 2;
+}
+
 service ControlService {
   // Override the default authorization method.
   option (kudu.rpc.default_authz_method) = "Authorize";
@@ -522,4 +546,8 @@ service ControlService {
 
   // Called by an impalad to ask another impalad to kill a query.
   rpc KillQuery(KillQueryRequestPB) returns (KillQueryResponsePB);
+
+  // Called by an executor to obtain a fresh storage credential from the coordinator's
+  // frontend when a per-table Iceberg vended STS token is near expiry.
+  rpc FetchCredentials(FetchCredentialsRequestPB) returns (FetchCredentialsResponsePB);
 }

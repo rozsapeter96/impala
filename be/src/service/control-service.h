@@ -25,6 +25,8 @@
 #include "kudu/rpc/rpc_controller.h"
 
 #include "common/status.h"
+#include "runtime/query-driver.h"
+#include "util/thread-pool.h"
 
 using kudu::MonoDelta;
 using kudu::rpc::RpcContext;
@@ -44,6 +46,15 @@ class MemTracker;
 class MetricGroup;
 class QueryExecMgr;
 class TRuntimeProfileTree;
+
+/// One queued FetchCredentials RPC. 'query_handle' keeps the query registered until the
+/// response is sent.
+struct FetchCredentialsWork {
+  const FetchCredentialsRequestPB* request = nullptr;
+  FetchCredentialsResponsePB* response = nullptr;
+  kudu::rpc::RpcContext* rpc_context = nullptr;
+  QueryHandle query_handle;
+};
 
 /// This singleton class implements service for managing execution of queries in Impala.
 class ControlService : public ControlServiceIf {
@@ -80,6 +91,15 @@ class ControlService : public ControlServiceIf {
   virtual void KillQuery(const KillQueryRequestPB* request,
       KillQueryResponsePB* response, ::kudu::rpc::RpcContext* rpc_context) override;
 
+  /// Fetches fresh storage credentials for the Iceberg table named in 'req' by asking
+  /// the local frontend. The query named in 'req' must be live on this coordinator and
+  /// must reference the table. The catalog round trip runs on 'fetch_credentials_pool_'
+  /// so that it never blocks the service threads shared with ReportExecStatus(). On
+  /// success, a TFetchCredentialsResponse is attached as an outbound Thrift sidecar and
+  /// its index set in 'resp'.
+  virtual void FetchCredentials(const FetchCredentialsRequestPB* req,
+      FetchCredentialsResponsePB* resp, ::kudu::rpc::RpcContext* rpc_context) override;
+
   /// Gets a ControlService proxy to a server with 'address' and 'hostname'.
   /// The newly created proxy is returned in 'proxy'. Returns error status on failure.
   static Status GetProxy(const NetworkAddressPB& address, const std::string& hostname,
@@ -88,6 +108,12 @@ class ControlService : public ControlServiceIf {
  private:
   /// Tracks the memory usage of payload in the service queue.
   std::unique_ptr<MemTracker> mem_tracker_;
+
+  /// Runs the frontend round trips of FetchCredentials() off the service threads.
+  std::unique_ptr<ThreadPool<FetchCredentialsWork>> fetch_credentials_pool_;
+
+  /// Worker for 'fetch_credentials_pool_': performs the frontend call and responds.
+  void DoFetchCredentials(int thread_id, const FetchCredentialsWork& work);
 
   /// Helper for deserializing runtime profile from the sidecar attached in the inbound
   /// call within 'rpc_context'. On success, returns the deserialized profile in

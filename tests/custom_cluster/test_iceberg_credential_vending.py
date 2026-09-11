@@ -20,6 +20,7 @@
 
 import logging
 import os
+import re
 import subprocess
 
 import pytest
@@ -37,6 +38,12 @@ VENDED_IMPALAD_ARGS = (
     .format(IMPALA_HOME))
 NOVEND_IMPALAD_ARGS = VENDED_IMPALAD_ARGS.replace(
     "iceberg_s3_vended_config", "iceberg_s3_novend_config")
+# --v=2 turns on the verbose credential-refresh tracing in QueryCredentials and
+# ControlService::FetchCredentials; only used by the refresh-exercising tests.
+REFRESH_TRACE_ARGS = " --v=2"
+# A refresh threshold larger than the token TTL (900s) makes every credential
+# near-expiry on first lookup, deterministically exercising the refresh path.
+FORCE_REFRESH_ARGS = REFRESH_TRACE_ARGS + " --credential_refresh_threshold_s=100000"
 NO_CATALOGD_STARTARGS = '--no_catalogd'
 
 # The RustFS root credentials (see docker-compose.yaml), for the process-global
@@ -112,6 +119,12 @@ class TestIcebergCredentialVending(CustomClusterTestSuite):
       raise Exception("Cannot specify HIVE_CONF_DIR: these tests run without Hive.")
     super(TestIcebergCredentialVending, self).setup_method(method)
 
+  def _count_coordinator_log_matches(self, line_regex):
+    """Number of lines of the coordinator's INFO log matching 'line_regex'."""
+    pattern = re.compile(line_regex)
+    with open(self.build_log_path("impalad", "INFO"), 'rb') as log_file:
+      return sum(1 for line in log_file if pattern.search(line.decode(errors='ignore')))
+
   def _check_nation_scan(self, client):
     """Loads and scans the seeded ice_s3.nation table. Reading n_name forces the
     backend to open the data file; COUNT(*) alone could be answered from stats."""
@@ -130,6 +143,17 @@ class TestIcebergCredentialVending(CustomClusterTestSuite):
   def test_scan_with_vended_credentials(self, vector):
     """Scanning the seeded S3-backed table succeeds using vended credentials."""
     self._check_nation_scan(self.create_impala_client())
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+      impalad_args=VENDED_IMPALAD_ARGS + FORCE_REFRESH_ARGS,
+      start_args=NO_CATALOGD_STARTARGS, disable_log_buffering=True)
+  def test_scan_with_expiring_vended_credentials(self, vector):
+    """A scan still succeeds when the vended credential is treated as near-expiry:
+    QueryCredentials refreshes it through the coordinator before use."""
+    self._check_nation_scan(self.create_impala_client())
+    self.assert_impalad_log_contains("INFO", "Refreshed 1 credential\\(s\\) for table "
+        "'ice_s3.nation'", expected_count=-1)
 
   @pytest.mark.execute_serially
   @CustomClusterTestSuite.with_args(
@@ -167,3 +191,29 @@ class TestIcebergCredentialVending(CustomClusterTestSuite):
         "SELECT count(*) FROM (SELECT n_name AS v FROM ice_s3.nation UNION ALL "
         "SELECT val FROM ice_s3.many_files) t")
     assert result.data == ['102']
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+      # Every credential is treated as near-expiry (threshold > token TTL), so the first
+      # lookup refreshes; --credential_refresh_min_interval_s then bounds the rate at
+      # which the remaining 99 file opens may refresh again.
+      impalad_args=VENDED_IMPALAD_ARGS + FORCE_REFRESH_ARGS,
+      start_args=NO_CATALOGD_STARTARGS, disable_log_buffering=True)
+  def test_scan_many_files_with_expiring_vended_credentials(self, vector):
+    """A scan of a 100-file table succeeds when every vended credential is treated as
+    near-expiry, and the refresh rate limit keeps the coordinator round trips to a
+    handful rather than one per file."""
+    client = self.create_impala_client()
+    self.execute_query_expect_success(client, "DESCRIBE ice_s3.many_files")
+    # Reading a materialized column forces the backend to open every one of the 100 S3
+    # objects, so credentials are resolved for all of them.
+    result = self.execute_query_expect_success(
+        client, "SELECT count(DISTINCT val) FROM ice_s3.many_files")
+    assert result.data == ['100']
+    # With the default 60s minimum interval, a scan that finishes within seconds
+    # refreshes once (inline) plus at most a couple of periodic refreshes.
+    self.assert_impalad_log_contains("INFO", "Refreshed 1 credential\\(s\\) for table "
+        "'ice_s3.many_files'", expected_count=-1)
+    refreshes = self._count_coordinator_log_matches(
+        "Refreshed 1 credential\\(s\\) for table 'ice_s3.many_files'")
+    assert refreshes <= 5, "Expected the refresh storm to be rate limited, got %d" % refreshes
