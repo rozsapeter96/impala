@@ -66,6 +66,7 @@ add_library(Runtime
   hbase-table.cc
   hbase-table-factory.cc
   hdfs-fs-cache.cc
+  s3-conn-credentials.cc
   initial-reservations.cc
   krpc-data-stream-mgr.cc
   krpc-data-stream-recvr.cc
