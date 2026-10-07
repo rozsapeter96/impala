@@ -97,6 +97,7 @@ import org.apache.impala.analysis.GrantRevokeRoleStmt;
 import org.apache.impala.analysis.InsertStmt;
 import org.apache.impala.analysis.OptimizeStmt;
 import org.apache.impala.analysis.ParsedStatement;
+import org.apache.impala.analysis.PathResolver;
 import org.apache.impala.analysis.Parser;
 import org.apache.impala.analysis.QueryStmt;
 import org.apache.impala.analysis.ResetMetadataStmt;
@@ -2421,17 +2422,14 @@ public class Frontend {
       TableName tblName = ((SingleTableStmt) stmt).getTableName();
       // Statements like global INVALIDATE METADATA don't have the table name.
       if (tblName == null) return;
-      if (!tblName.isFullyQualified()) {
-        tblName = new TableName(sessionDb, tblName.getTbl());
-      }
-      tableNames = Collections.singletonList(tblName);
+      tableNames = Collections.singletonList(
+          PathResolver.getFqTableName(tblName, sessionDb));
     } else {
       List<TableRef> tblRefs = new ArrayList<>();
       stmt.collectTableRefs(tblRefs);
       tableNames = new HashSet<>();
       for (TableRef ref : tblRefs) {
-        tableNames.addAll(org.apache.impala.analysis.Path.getCandidateTables(
-            ref.getPath(), sessionDb));
+        tableNames.addAll(PathResolver.getCandidateTables(ref.getPath(), sessionDb));
       }
     }
     Set<String> dbNames = new HashSet<>();

@@ -417,8 +417,8 @@ public class StmtMetadataLoader {
    * 'loadedOrFailedTbls_'.
    * Returns the set of tables that are not loaded. Recursively collects loaded/missing
    * tables from views. Uses 'sessionDb_' to construct table candidates from views with
-   * Path.getCandidateTables(). Non-existent tables are ignored and not returned or
-   * added to 'loadedOrFailedTbls_'.
+   * PathResolver.getCandidateTables(). Non-existent tables are ignored and not returned
+   * or added to 'loadedOrFailedTbls_'.
    */
   private Set<TableName> getMissingTables(final FeCatalog catalog, Set<TableName> tbls,
       Map<TableName, FeTable> missingTblsSnapshot) throws InternalException {
@@ -480,7 +480,8 @@ public class StmtMetadataLoader {
    * Returns the set of tables whose metadata needs to be loaded for the analysis of the
    * given 'stmt' to succeed. This is done by collecting all table references from 'stmt'
    * and generating all possible table-path resolutions considered during analysis.
-   * Uses 'sessionDb_' to construct the candidate tables with Path.getCandidateTables().
+   * Uses 'sessionDb_' to construct the candidate tables with
+   * PathResolver.getCandidateTables().
    */
   public Set<TableName> collectTableCandidates(StatementBase stmt) {
     Preconditions.checkNotNull(stmt);
@@ -488,7 +489,7 @@ public class StmtMetadataLoader {
     stmt.collectTableRefs(tblRefs);
     Set<TableName> tableNames = new HashSet<>();
     for (TableRef ref: tblRefs) {
-      tableNames.addAll(Path.getCandidateTables(ref.getPath(), sessionDb_));
+      tableNames.addAll(PathResolver.getCandidateTables(ref.getPath(), sessionDb_));
     }
     return tableNames;
   }

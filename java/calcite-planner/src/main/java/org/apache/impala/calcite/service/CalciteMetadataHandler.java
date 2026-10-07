@@ -34,6 +34,7 @@ import org.apache.calcite.sql.SqlWith;
 import org.apache.calcite.sql.SqlWithItem;
 import org.apache.calcite.sql.util.SqlBasicVisitor;
 import org.apache.impala.analysis.Analyzer;
+import org.apache.impala.analysis.PathResolver;
 import org.apache.impala.analysis.StmtMetadataLoader;
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.analysis.TimeTravelSpec;
@@ -236,9 +237,10 @@ public class CalciteMetadataHandler {
         errorTables_.add(tableNameString);
         return;
       }
-      TableName tableName = parts.size() == 1
-          ? new TableName(currentDb_.toLowerCase(), parts.get(0).toLowerCase())
-          : new TableName(parts.get(0).toLowerCase(), parts.get(1).toLowerCase());
+      TableName tableName = PathResolver.getFqTableName(parts.size() == 1
+          ? new TableName(null, parts.get(0).toLowerCase())
+          : new TableName(parts.get(0).toLowerCase(), parts.get(1).toLowerCase()),
+          currentDb_.toLowerCase());
 
       // Do not collect this table if 'tableNameToAdd' was already registered via
       // a SqlWithItem node since in this case 'tableNameToAdd' is not an actual

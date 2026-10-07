@@ -29,7 +29,6 @@ import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,7 +63,6 @@ import org.apache.impala.catalog.FeKuduTable;
 import org.apache.impala.catalog.FeSystemTable;
 import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.FeView;
-import org.apache.impala.catalog.IcebergTimeTravelTable;
 import org.apache.impala.catalog.KuduTable;
 import org.apache.impala.catalog.ScalarType;
 import org.apache.impala.catalog.StructField;
@@ -956,6 +954,9 @@ public class Analyzer {
   // map from lowercase table alias to a view definition in this analyzer's scope
   private final Map<String, FeView> localViews_ = new HashMap<>();
 
+  // Resolves names and paths in the context of this query block. Created on demand.
+  private PathResolver pathResolver_;
+
   // Map from lowercase table alias to descriptor. Tables without an explicit alias
   // are assigned two implicit aliases: the unqualified and fully-qualified table name.
   // Such tables have two entries pointing to the same descriptor. If an alias is
@@ -1038,6 +1039,13 @@ public class Analyzer {
     Preconditions.checkState(tid == null || visibleSemiJoinedTupleId_ == null);
     visibleSemiJoinedTupleId_ = tid;
   }
+
+  /**
+   * Returns the WITH-clause view registered in this query block under 'alias', or null.
+   */
+  FeView getLocalView(String alias) { return localViews_.get(alias); }
+
+  boolean isSubquery() { return isSubquery_; }
 
   public boolean hasAncestors() { return !ancestors_.isEmpty(); }
   public Analyzer getParentAnalyzer() {
@@ -1189,17 +1197,8 @@ public class Analyzer {
       LOG.trace("Resolving TableRef {}", ToSqlUtils.getPathSql(tableRef.getPath()));
     }
     // Try to find a matching local view.
-    if (tableRef.getPath().size() == 1) {
-      // Searches the hierarchy of analyzers bottom-up for a registered local view with
-      // a matching alias.
-      String viewAlias = tableRef.getPath().get(0).toLowerCase();
-      Analyzer analyzer = this;
-      do {
-        FeView localView = analyzer.localViews_.get(viewAlias);
-        if (localView != null) return new InlineViewRef(localView, tableRef);
-        analyzer = (analyzer.ancestors_.isEmpty() ? null : analyzer.ancestors_.get(0));
-      } while (analyzer != null);
-    }
+    FeView localView = getPathResolver().resolveLocalView(tableRef.getPath());
+    if (localView != null) return new InlineViewRef(localView, tableRef);
 
     // Resolve the table ref's path and determine what resolved table ref
     // to replace it with.
@@ -1523,27 +1522,8 @@ public class Analyzer {
   }
 
   /**
-   * Resolves the given raw path according to the given path type, as follows:
-   * SLOT_REF and STAR: Resolves the path in the context of all registered tuple
-   * descriptors, considering qualified as well as unqualified matches.
-   * TABLE_REF: Resolves the path in the context of all registered tuple descriptors
-   * only considering qualified matches, as well as catalog tables/views.
-   *
-   * Path resolution:
-   * Regardless of the path type, a raw path can have multiple successful resolutions.
-   * A resolution is said to be 'successful' if all raw path elements can be mapped
-   * to a corresponding alias/table/column/field.
-   *
-   * Path legality:
-   * A successful resolution may be illegal with respect to the path type, e.g.,
-   * a SlotRef cannot reference intermediate collection types, etc.
-   *
-   * Path ambiguity:
-   * A raw path is ambiguous if it has multiple legal resolutions. Otherwise,
-   * the ambiguity is resolved in favor of the legal resolution.
-   *
-   * Returns the single legal path resolution if it exists.
-   * Throws if there was no legal resolution or if the path is ambiguous.
+   * Resolves the given raw path according to the given path type. See
+   * PathResolver.resolve().
    */
   public Path resolvePath(List<String> rawPath, PathType pathType)
       throws AnalysisException, TableLoadingException {
@@ -1552,229 +1532,15 @@ public class Analyzer {
 
   public Path resolvePath(List<String> rawPath, PathType pathType,
       TimeTravelSpec timeTravelSpec) throws AnalysisException, TableLoadingException {
-    // We only allow correlated references in predicates of a subquery.
-    boolean resolveInAncestors = false;
-    if (pathType == PathType.TABLE_REF || pathType == PathType.ANY) {
-      resolveInAncestors = true;
-    } else if (pathType == PathType.SLOT_REF) {
-      resolveInAncestors = isSubquery_;
-    }
-    // Convert all path elements to lower case.
-    List<String> lcRawPath = Lists.newArrayListWithCapacity(rawPath.size());
-    for (String s: rawPath) lcRawPath.add(s.toLowerCase());
-    return resolvePath(lcRawPath, pathType, resolveInAncestors, timeTravelSpec);
-  }
-
-  private Path resolvePath(List<String> rawPath, PathType pathType,
-      boolean resolveInAncestors, TimeTravelSpec timeTravelSpec)
-      throws AnalysisException, TableLoadingException {
-    // List of all candidate paths with different roots. Paths in this list are initially
-    // unresolved and may be illegal with respect to the pathType.
-    List<Path> candidates = getTupleDescPaths(rawPath);
-    if (LOG.isTraceEnabled()) {
-      LOG.trace("Candidates for {} {}: {}", pathType, ToSqlUtils.getPathSql(rawPath),
-          candidates);
-    }
-    LinkedList<String> errors = Lists.newLinkedList();
-    if (pathType == PathType.SLOT_REF || pathType == PathType.STAR) {
-      // Paths rooted at all of the unique registered tuple descriptors.
-      for (TableRef tblRef: tableRefMap_.values()) {
-        if (tblRef.isHidden()) continue;
-        candidates.add(new Path(tblRef.getDesc(), rawPath));
-      }
-    } else {
-      // Always prefer table ref paths rooted at a registered tuples descriptor.
-      Preconditions.checkState(pathType == PathType.TABLE_REF ||
-          pathType == PathType.ANY);
-      Path result = resolvePaths(rawPath, candidates, pathType, errors);
-      if (result != null) return result;
-      candidates.clear();
-
-      // Add paths rooted at a table with an unqualified and fully-qualified table name.
-      List<TableName> candidateTbls = Path.getCandidateTables(rawPath, getDefaultDb());
-      if (LOG.isTraceEnabled()) {
-        LOG.trace("Candidate tables to lookup in catalog/cache for {} {}: {}", pathType,
-            ToSqlUtils.getPathSql(rawPath), candidateTbls);
-      }
-      for (int tblNameIdx = 0; tblNameIdx < candidateTbls.size(); ++tblNameIdx) {
-        TableName tblName = candidateTbls.get(tblNameIdx);
-        FeTable tbl = null;
-        try {
-          tbl = getTable(tblName, /* must_exist */ false);
-        } catch (AnalysisException e) {
-          // Ignore to allow path resolution to continue.
-        }
-        if (tbl != null) {
-          if (timeTravelSpec != null) {
-            if (!(tbl instanceof FeIcebergTable)) {
-              throw new AnalysisException(String.format(
-                  "FOR %s AS OF clause is only supported for Iceberg tables. "
-                      + "%s is not an Iceberg table.",
-                  timeTravelSpec.getKind() == TimeTravelSpec.Kind.TIME_AS_OF ?
-                      "SYSTEM_TIME" :
-                      "SYSTEM_VERSION",
-                  tbl.getFullName()));
-            }
-            timeTravelSpec.analyze(this);
-
-            FeIcebergTable rootTable = (FeIcebergTable) tbl;
-            tbl = new IcebergTimeTravelTable(rootTable, timeTravelSpec);
-          }
-          int offset = tblNameIdx + (tbl instanceof IcebergMetadataTable ? 2 : 1);
-          candidates.add(new Path(tbl, rawPath.subList(offset, rawPath.size())));
-        }
-      }
-      LOG.trace("Replace candidates with {}", candidates);
-    }
-
-    Path result = resolvePaths(rawPath, candidates, pathType, errors);
-    if (result == null && resolveInAncestors && hasAncestors()) {
-      LOG.trace("Resolve in ancestors");
-      result = getParentAnalyzer().resolvePath(rawPath, pathType, true, timeTravelSpec);
-    }
-    if (result == null) {
-      Preconditions.checkState(!errors.isEmpty());
-      throw new AnalysisException(errors.getFirst());
-    }
-    if (LOG.isTraceEnabled()) {
-      LOG.trace("Resolved {} {} to {}", pathType, ToSqlUtils.getPathSql(rawPath),
-          result.debugString());
-    }
-    return result;
+    return getPathResolver().resolve(rawPath, pathType, timeTravelSpec);
   }
 
   /**
-   * Returns a list of unresolved Paths that are rooted at a registered tuple
-   * descriptor matching a prefix of the given raw path.
+   * Returns the resolver of names and paths in the context of this query block.
    */
-  public List<Path> getTupleDescPaths(List<String> rawPath)
-      throws AnalysisException {
-    List<Path> result = new ArrayList<>();
-
-    // Path rooted at a tuple desc with an explicit or implicit unqualified alias.
-    TupleDescriptor rootDesc = getDescriptor(rawPath.get(0));
-    if (rootDesc != null && !rootDesc.isHidden()) {
-      result.add(new Path(rootDesc, rawPath.subList(1, rawPath.size())));
-    }
-
-    // Path rooted at a tuple desc with an implicit qualified alias.
-    if (rawPath.size() > 1) {
-      rootDesc = getDescriptor(rawPath.get(0) + "." + rawPath.get(1));
-      if (rootDesc != null && !rootDesc.isHidden()) {
-        result.add(new Path(rootDesc, rawPath.subList(2, rawPath.size())));
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Resolves the given paths and checks them for legality and ambiguity. Returns the
-   * single legal path resolution if it exists, null otherwise.
-   * Populates 'errors' with a prioritized list of error messages starting with the
-   * most relevant one. The list contains at least one error message if null is returned.
-   */
-  private Path resolvePaths(List<String> rawPath, List<Path> paths, PathType pathType,
-      LinkedList<String> errors) {
-    // For generating error messages.
-    String pathTypeStr = null;
-    String pathStr = Joiner.on(".").join(rawPath);
-    if (pathType == PathType.SLOT_REF) {
-      pathTypeStr = "Column/field reference";
-    } else if (pathType == PathType.TABLE_REF) {
-      pathTypeStr = "Table reference";
-    } else if (pathType == PathType.ANY) {
-      pathTypeStr = "Path";
-    } else {
-      Preconditions.checkState(pathType == PathType.STAR);
-      pathTypeStr = "Star expression";
-      pathStr += ".*";
-    }
-
-    List<Path> legalPaths = new ArrayList<>();
-    for (Path p: paths) {
-      if (!p.resolve()) {
-        LOG.trace("Can't resolve path {}", p);
-        continue;
-      }
-
-      // Check legality of the resolved path.
-      if (p.isRootedAtTuple() && !isVisible(p.getRootDesc().getId())) {
-        errors.addLast(String.format(
-            "Illegal %s '%s' of semi-/anti-joined table '%s'",
-            pathTypeStr.toLowerCase(), pathStr, p.getRootDesc().getAlias()));
-        continue;
-      }
-      switch (pathType) {
-        // Illegal cases:
-        // 1. Destination type is not a collection.
-        case TABLE_REF: {
-          if (!p.destType().isCollectionType()) {
-            errors.addFirst(String.format(
-                "Illegal table reference to non-collection type: '%s'\n" +
-                    "Path resolved to type: %s", pathStr, p.destType().toSql()));
-            continue;
-          }
-          break;
-        }
-        case SLOT_REF: {
-          // Illegal cases:
-          // 1. Path contains an intermediate collection reference.
-          // 2. Destination of the path is a catalog table or a registered alias.
-          if (p.hasNonDestCollection()) {
-            errors.addFirst(String.format(
-                "Illegal column/field reference '%s' with intermediate " +
-                "collection '%s' of type '%s'",
-                pathStr, p.getFirstCollectionName(),
-                p.getFirstCollectionType().toSql()));
-            continue;
-          }
-          // Error should be "Could not resolve...". No need to add it here explicitly.
-          if (p.getMatchedTypes().isEmpty()) continue;
-          break;
-        }
-        // Illegal cases:
-        // 1. Path contains an intermediate collection reference.
-        // 2. Destination type of the path is not a struct.
-        case STAR: {
-          if (p.hasNonDestCollection()) {
-            errors.addFirst(String.format(
-                "Illegal star expression '%s' with intermediate " +
-                "collection '%s' of type '%s'",
-                pathStr, p.getFirstCollectionName(),
-                p.getFirstCollectionType().toSql()));
-            continue;
-          }
-          if (!p.destType().isStructType()) {
-            errors.addFirst(String.format(
-                "Cannot expand star in '%s' because path '%s' resolved to type '%s'." +
-                "\nStar expansion is only valid for paths to a struct type.",
-                pathStr, Joiner.on(".").join(rawPath), p.destType().toSql()));
-            continue;
-          }
-          break;
-        }
-        case ANY: {
-          // Any path is valid.
-          break;
-        }
-      }
-      legalPaths.add(p);
-    }
-
-    if (legalPaths.size() > 1) {
-      errors.addFirst(String.format("%s is ambiguous: '%s'",
-          pathTypeStr, pathStr));
-      return null;
-    }
-    if (legalPaths.isEmpty()) {
-      if (errors.isEmpty()) {
-        errors.addFirst(String.format("Could not resolve %s: '%s'",
-            pathTypeStr.toLowerCase(), pathStr));
-      }
-      return null;
-    }
-    if (LOG.isTraceEnabled()) LOG.trace("Legal candidate: {}", legalPaths.get(0));
-    return legalPaths.get(0);
+  public PathResolver getPathResolver() {
+    if (pathResolver_ == null) pathResolver_ = new PathResolver(this);
+    return pathResolver_;
   }
 
   public SlotDescriptor registerSlotRef(Path slotPath) throws AnalysisException {
@@ -3928,7 +3694,7 @@ public class Analyzer {
    */
   public FeTable getTable(TableName tblName, boolean mustExist)
       throws AnalysisException, TableLoadingException {
-    if (IcebergMetadataTable.isIcebergMetadataTable(tblName.toPath(), this)) {
+    if (getPathResolver().isIcebergMetadataTable(tblName.toPath())) {
       return getMetadataVirtualTable(tblName.toPath());
     }
     FeTable table = globalState_.stmtTableCache.tables.get(tblName);
@@ -3980,8 +3746,7 @@ public class Analyzer {
    */
   public FeTable getMetadataVirtualTable(List<String> tblRefPath)
       throws AnalysisException {
-    Preconditions.checkArgument(
-        IcebergMetadataTable.canBeIcebergMetadataTable(tblRefPath));
+    Preconditions.checkArgument(PathResolver.canBeIcebergMetadataTable(tblRefPath));
     try {
       TableName catalogTableName = new TableName(tblRefPath.get(0),
           tblRefPath.get(1));
@@ -4270,8 +4035,7 @@ public class Analyzer {
    * is already fully qualified, returns tableName.
    */
   public TableName getFqTableName(TableName tableName) {
-    if (tableName.isFullyQualified()) return tableName;
-    return new TableName(getDefaultDb(), tableName.getTbl());
+    return PathResolver.getFqTableName(tableName, getDefaultDb());
   }
 
   public void setMaskPrivChecks(String errMsg) {

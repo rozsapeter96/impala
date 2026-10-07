@@ -341,35 +341,6 @@ public class Path {
     }
   }
 
-  /**
-   * Returns a list of table names that might be referenced by the given path.
-   * The path must be non-empty.
-   *
-   * Examples: path -> result
-   * a -> [<sessionDb>.a]
-   * a.b -> [<sessionDb>.a, a.b]
-   * a.b.c -> [<sessionDb>.a, a.b]
-   * a.b.c... -> [<sessionDb>.a, a.b]
-   *
-   * Notes on Iceberg tables:
-   * a.b.c -> translates to metadata table querying
-   */
-  public static List<TableName> getCandidateTables(List<String> path, String sessionDb) {
-    Preconditions.checkArgument(path != null && !path.isEmpty());
-    List<TableName> result = new ArrayList<>();
-    int end = Math.min(2, path.size());
-    for (int tblNameIdx = 0; tblNameIdx < end; ++tblNameIdx) {
-      String dbName = (tblNameIdx == 0) ? sessionDb : path.get(0);
-      String tblName = path.get(tblNameIdx);
-      String vTblName = null;
-      if (IcebergMetadataTable.canBeIcebergMetadataTable(path)) {
-        vTblName = path.get(2);
-      }
-      result.add(new TableName(dbName, tblName, vTblName));
-    }
-    return result;
-  }
-
   public FeTable getRootTable() { return rootTable_; }
   public TupleDescriptor getRootDesc() { return rootDesc_; }
   public boolean isRootedAtTable() { return rootTable_ != null; }

@@ -17,20 +17,16 @@
 
 package org.apache.impala.catalog.iceberg;
 
-import java.util.List;
 import java.util.Set;
 
-import org.apache.commons.lang3.EnumUtils;
 import org.apache.iceberg.MetadataTableType;
 import org.apache.iceberg.MetadataTableUtils;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
-import org.apache.impala.analysis.Analyzer;
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.catalog.CatalogObject.ThriftObjectType;
 import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.FeIcebergTable;
-import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.IcebergColumn;
 import org.apache.impala.catalog.VirtualTable;
 import org.apache.impala.common.ImpalaRuntimeException;
@@ -125,39 +121,5 @@ public class IcebergMetadataTable extends VirtualTable {
     desc.setIcebergTable(FeIcebergTable.Utils.getTIcebergTable(baseTable_,
         ThriftObjectType.DESCRIPTOR_ONLY));
     return desc;
-  }
-
-  /**
-   * Returns true if the table ref is referring to a valid metadata table.
-   */
-  public static boolean isIcebergMetadataTable(List<String> tblRefPath,
-      Analyzer analyzer) {
-    if (!canBeIcebergMetadataTable(tblRefPath)) return false;
-
-    TableName virtualTableName = new TableName(tblRefPath.get(0),
-        tblRefPath.get(1), tblRefPath.get(2));
-    // The catalog table (the base of the virtual table) has been loaded and cached
-    // under the name of the virtual table.
-    FeTable catalogTable = analyzer.getStmtTableCache().tables.get(virtualTableName);
-    // If the metadata table has already been analyzed in the query, the table cache will
-    // return the virtual table, not the base table.
-    return catalogTable instanceof FeIcebergTable ||
-        catalogTable instanceof IcebergMetadataTable;
-  }
-
-  /**
-   * Returns true if the path could refer to an Iceberg metadata table in a syntactically
-   * correct way (also checking that the name of the metadata table is valid). Does not
-   * check whether the base table is an Iceberg table, so the path is not guaranteed to
-   * actually refer to a valid Iceberg metadata table.
-   *
-   * This function can be called before analysis is done, when isIcebergMetadataTable()
-   * cannot be called.
-   */
-  public static boolean canBeIcebergMetadataTable(List<String> tblRefPath) {
-    if (tblRefPath == null) return false;
-    if (tblRefPath.size() < 3) return false;
-    String vTableName = tblRefPath.get(2).toUpperCase();
-    return EnumUtils.isValidEnum(MetadataTableType.class, vTableName);
   }
 }

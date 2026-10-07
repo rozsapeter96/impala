@@ -120,7 +120,8 @@ public abstract class ModifyStmt extends DmlStatementBase {
     super.analyze(analyzer);
     fromClause_.analyze(analyzer);
 
-    List<Path> candidates = analyzer.getTupleDescPaths(targetTablePath_);
+    List<Path> candidates =
+        analyzer.getPathResolver().getAliasCandidates(targetTablePath_);
     if (candidates.isEmpty()) {
       throw new AnalysisException(format("'%s' is not a valid table alias or reference.",
           Joiner.on(".").join(targetTablePath_)));

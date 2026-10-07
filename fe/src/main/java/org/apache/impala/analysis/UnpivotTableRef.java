@@ -199,7 +199,7 @@ public class UnpivotTableRef extends TableRef {
       throws AnalysisException {
     Path sourceTableSlotPath = new Path(sourceTableRef_.getDesc(), rawPath);
     if (!sourceTableSlotPath.resolve()) {
-      // The error message is the same as in Analyzer.resolvePaths().
+      // The error message is the same as in PathResolver.resolveCandidates().
       throw new AnalysisException(String.format(
           "Could not resolve column/field reference: '%s'",
           Joiner.on(".").join(rawPath)));

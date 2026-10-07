@@ -123,7 +123,7 @@ public class PathResolutionTest extends FrontendTestBase {
 
   private void assertCandidates(List<String> path, String sessionDb,
       String... expected) {
-    List<TableName> candidates = Path.getCandidateTables(path, sessionDb);
+    List<TableName> candidates = PathResolver.getCandidateTables(path, sessionDb);
     String[] actual = new String[candidates.size()];
     for (int i = 0; i < candidates.size(); ++i) {
       TableName t = candidates.get(i);
