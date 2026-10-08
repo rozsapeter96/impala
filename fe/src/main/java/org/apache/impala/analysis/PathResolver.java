@@ -177,11 +177,6 @@ public class PathResolver {
     return new TableName(catalog, sessionDb.getDb(), tableName.getTbl(), null);
   }
 
-  /** getFqTableName() for a session database 'sessionDb' without a catalog. */
-  public static TableName getFqTableName(TableName tableName, String sessionDb) {
-    return getFqTableName(tableName, new QualifiedDbName(null, sessionDb));
-  }
-
   /**
    * Returns the WITH-clause view that the single-part table ref path 'rawPath' refers
    * to, or null if there is none. Searches the hierarchy of analyzers bottom-up.

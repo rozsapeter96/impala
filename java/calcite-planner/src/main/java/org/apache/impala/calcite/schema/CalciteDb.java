@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableMap;
 import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeImpl;
+import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
 import org.apache.calcite.schema.impl.ViewTable;
@@ -45,8 +46,18 @@ public class CalciteDb extends AbstractSchema {
 
   private final Map<String, Table> tableMap_;
 
-  private CalciteDb(Map<String, Table> tableMap) {
+  // Sub-schemas by name. A root-level schema has the databases of the catalog with
+  // the same name as sub-schemas, see CalciteMetadataHandler.populateCalciteSchema().
+  private final Map<String, Schema> subSchemaMap_;
+
+  private CalciteDb(Map<String, Table> tableMap, Map<String, Schema> subSchemaMap) {
     this.tableMap_ = tableMap;
+    this.subSchemaMap_ = subSchemaMap;
+  }
+
+  @Override
+  protected Map<String, Schema> getSubSchemaMap() {
+    return subSchemaMap_;
   }
 
   @Override
@@ -58,9 +69,19 @@ public class CalciteDb extends AbstractSchema {
     private CalciteCatalogReader reader_;
 
     private final Map<String, Table> tableMap_ = new HashMap<>();
+    private final Map<String, Schema> subSchemaMap_ = new HashMap<>();
+
+    // The catalog of the tables of this db if they were referenced with
+    // catalog-qualified names, null otherwise.
+    private final String catalog_;
 
     public Builder(CalciteCatalogReader reader) {
+      this(reader, null);
+    }
+
+    public Builder(CalciteCatalogReader reader, String catalog) {
       this.reader_ = reader;
+      this.catalog_ = catalog;
     }
 
     /**
@@ -76,8 +97,10 @@ public class CalciteDb extends AbstractSchema {
 
       FeIcebergTable feTimeTravelTable =
           new IcebergTimeTravelTable((FeIcebergTable) table, tts);
-      tableMap_.put(tableNameKey,
-          new CalciteIcebergTable(feTimeTravelTable, reader_, analyzer, tableNameKey));
+      CalciteIcebergTable timeTravelTable =
+          new CalciteIcebergTable(feTimeTravelTable, reader_, analyzer, tableNameKey);
+      timeTravelTable.setCatalog(catalog_);
+      tableMap_.put(tableNameKey, timeTravelTable);
       return this;
     }
 
@@ -91,6 +114,7 @@ public class CalciteDb extends AbstractSchema {
         throw new UnsupportedFeatureException("Table " + feTable.getFullName()
             + " has unsupported type " + feTable.getClass().getSimpleName() + ".");
       }
+      if (table instanceof CalciteTable) ((CalciteTable) table).setCatalog(catalog_);
       tableMap_.put(tableName.toLowerCase(), table);
       return this;
     }
@@ -122,8 +146,14 @@ public class CalciteDb extends AbstractSchema {
           feTable.getName().toLowerCase()), (FeView) feTable);
     }
 
+    public Builder addSubSchema(String name, Schema schema) {
+      subSchemaMap_.put(name.toLowerCase(), schema);
+      return this;
+    }
+
     public CalciteDb build() {
-      return new CalciteDb(ImmutableMap.copyOf(tableMap_));
+      return new CalciteDb(ImmutableMap.copyOf(tableMap_),
+          ImmutableMap.copyOf(subSchemaMap_));
     }
   }
 }

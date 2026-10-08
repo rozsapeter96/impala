@@ -35,6 +35,7 @@ import org.apache.calcite.sql.SqlWithItem;
 import org.apache.calcite.sql.util.SqlBasicVisitor;
 import org.apache.impala.analysis.Analyzer;
 import org.apache.impala.analysis.PathResolver;
+import org.apache.impala.analysis.QualifiedDbName;
 import org.apache.impala.analysis.StmtMetadataLoader;
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.analysis.TimeTravelSpec;
@@ -89,8 +90,11 @@ public class CalciteMetadataHandler {
     props.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "false");
     CalciteConnectionConfig config = new CalciteConnectionConfigImpl(props);
     CalciteSchema rootSchema = CalciteSchema.createRootSchema(true);
-    return new ImpalaCalciteCatalogReader(rootSchema,
-        Collections.singletonList(database),
+    // Names are resolved in the session database, then in the root schema.
+    List<List<String>> schemaPaths = new ArrayList<>();
+    schemaPaths.add(Collections.singletonList(database));
+    schemaPaths.add(Collections.emptyList());
+    return new ImpalaCalciteCatalogReader(rootSchema, schemaPaths,
         typeFactory, config, queryCtx, stmtTableCache);
   }
 
@@ -105,8 +109,12 @@ public class CalciteMetadataHandler {
     List<String> notFoundTables = new ArrayList<>();
     CalciteSchema rootSchema = reader.getRootSchema();
     Map<String, CalciteDb.Builder> dbSchemas = new HashMap<>();
+    // Databases of catalog-qualified table names, by catalog and database name.
+    Map<String, Map<String, CalciteDb.Builder>> catalogDbSchemas = new HashMap<>();
     for (TableName tableName : stmtTableCache.tables.keySet()) {
-      FeDb db = catalog.getDb(tableName.getDb());
+      FeCatalog tblCatalog = tableName.getCatalog() == null ?
+          catalog : catalog.getCatalog(tableName.getCatalog());
+      FeDb db = tblCatalog == null ? null : tblCatalog.getDb(tableName.getDb());
       // db is not found, this will probably fail in the validation step
       if (db == null) {
         notFoundTables.add(tableName.toString());
@@ -122,8 +130,14 @@ public class CalciteMetadataHandler {
 
       // populate the dbschema with its table, creating the dbschema if it's the
       // first instance seen in the query.
-      CalciteDb.Builder dbBuilder =
-          dbSchemas.getOrDefault(tableName.getDb(), new CalciteDb.Builder(reader));
+      Map<String, CalciteDb.Builder> schemas = dbSchemas;
+      if (tableName.getCatalog() != null) {
+        schemas = catalogDbSchemas.computeIfAbsent(
+            tableName.getCatalog().toLowerCase(), c -> new HashMap<>());
+      }
+      CalciteDb.Builder dbBuilder = schemas.getOrDefault(
+          tableName.getDb().toLowerCase(), new CalciteDb.Builder(reader,
+          tableName.getCatalog() == null ? null : tableName.getCatalog().toLowerCase()));
       String lowerCaseTableName = tableName.getTbl().toLowerCase();
       List<TimeTravelSpec> timeTravelSpecs = timeTravelSpecMap.get(tableName);
       // Special case: The tables in the for loop come from the tables loaded in the
@@ -156,7 +170,21 @@ public class CalciteMetadataHandler {
           }
         }
       }
-      dbSchemas.put(tableName.getDb().toLowerCase(), dbBuilder);
+      schemas.put(tableName.getDb().toLowerCase(), dbBuilder);
+    }
+
+    // Add the databases of catalogs as sub-schemas of a root-level schema with the
+    // name of the catalog. If there is also a database with that name, the schema
+    // contains its tables as well: 'name.tbl' is a table of database 'name', and
+    // 'name.db.tbl' is a table of catalog 'name'.
+    for (Map.Entry<String, Map<String, CalciteDb.Builder>> catalogEntry :
+        catalogDbSchemas.entrySet()) {
+      CalciteDb.Builder catalogBuilder = dbSchemas.computeIfAbsent(
+          catalogEntry.getKey(), c -> new CalciteDb.Builder(reader));
+      for (Map.Entry<String, CalciteDb.Builder> dbEntry :
+          catalogEntry.getValue().entrySet()) {
+        catalogBuilder.addSubSchema(dbEntry.getKey(), dbEntry.getValue().build());
+      }
     }
 
     // add all databases to the root schema
@@ -171,7 +199,8 @@ public class CalciteMetadataHandler {
    * tableNames
    */
   public static class TableVisitor extends SqlBasicVisitor<Void> {
-    private final String currentDb_;
+    // The session database.
+    private final QualifiedDbName currentDb_;
     private final Map<TableName, List<TimeTravelSpec>> tableNames_ = new HashMap<>();
 
     // Error condition for now. Complex tables are not yet supported
@@ -185,7 +214,7 @@ public class CalciteMetadataHandler {
     public final Stack<Set<TableName>> withItemTableNames_ = new Stack<>();
 
     public TableVisitor(String currentDb) {
-      this.currentDb_ = currentDb.toLowerCase();
+      this.currentDb_ = new QualifiedDbName(null, currentDb.toLowerCase());
     }
 
     public Set<TableName> getTableNames() {
@@ -210,8 +239,8 @@ public class CalciteMetadataHandler {
       }
 
       if (call.getKind() == SqlKind.WITH_ITEM) {
-        TableName tableName = new TableName(this.currentDb_.toLowerCase(),
-            ((SqlWithItem) call).name.names.get(0).toLowerCase());
+        TableName tableName = PathResolver.getFqTableName(new TableName(null,
+            ((SqlWithItem) call).name.names.get(0).toLowerCase()), this.currentDb_);
         // Since a SqlWithItem node cannot exist without a SqlWith node, we can be sure
         // the top stack element was added by the respective SqlWith node of this
         // SqlWithItem. Adding 'tableName' to this stack element would allow us to
@@ -232,15 +261,22 @@ public class CalciteMetadataHandler {
     private void extractTableName(SqlIdentifier identifer,
         TimeTravelSpec timeTravelSpec) {
       String tableNameString = identifer.toString();
-      List<String> parts = Splitter.on('.').splitToList(tableNameString);
-      if (parts.size() > 2) {
+      List<String> parts = Splitter.on('.').splitToList(tableNameString.toLowerCase());
+      if (parts.size() > 3) {
         errorTables_.add(tableNameString);
         return;
       }
-      TableName tableName = PathResolver.getFqTableName(parts.size() == 1
-          ? new TableName(null, parts.get(0).toLowerCase())
-          : new TableName(parts.get(0).toLowerCase(), parts.get(1).toLowerCase()),
-          currentDb_.toLowerCase());
+      // Three parts are a catalog-qualified name: 'catalog.db.tbl'. Unlike the
+      // original planner, table refs can not refer to nested collections here, so
+      // there is no other interpretation.
+      TableName tableName;
+      if (parts.size() == 3) {
+        tableName = new TableName(parts.get(0), parts.get(1), parts.get(2), null);
+      } else {
+        tableName = PathResolver.getFqTableName(parts.size() == 1
+            ? new TableName(null, parts.get(0))
+            : new TableName(parts.get(0), parts.get(1)), currentDb_);
+      }
 
       // Do not collect this table if 'tableNameToAdd' was already registered via
       // a SqlWithItem node since in this case 'tableNameToAdd' is not an actual

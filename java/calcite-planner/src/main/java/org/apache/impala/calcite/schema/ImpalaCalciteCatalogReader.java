@@ -21,6 +21,7 @@ import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.sql.validate.SqlNameMatchers;
 import org.apache.impala.analysis.StmtMetadataLoader;
 import org.apache.impala.thrift.TQueryCtx;
 
@@ -30,10 +31,17 @@ public class ImpalaCalciteCatalogReader extends CalciteCatalogReader {
   private final TQueryCtx queryCtx_;
   private final StmtMetadataLoader.StmtTableCache stmtTableCache_;
 
-  public ImpalaCalciteCatalogReader(CalciteSchema rootSchema, List<String> defaultSchema,
-      RelDataTypeFactory typeFactory, CalciteConnectionConfig config, TQueryCtx queryCtx,
+  /**
+   * Creates a reader that resolves names with the schema paths 'schemaPaths', in that
+   * order.
+   */
+  public ImpalaCalciteCatalogReader(CalciteSchema rootSchema,
+      List<List<String>> schemaPaths, RelDataTypeFactory typeFactory,
+      CalciteConnectionConfig config, TQueryCtx queryCtx,
       StmtMetadataLoader.StmtTableCache stmtTableCache) {
-    super(rootSchema, defaultSchema, typeFactory, config);
+    super(rootSchema,
+        SqlNameMatchers.withCaseSensitive(config != null && config.caseSensitive()),
+        schemaPaths, typeFactory, config);
     this.queryCtx_ = queryCtx;
     this.stmtTableCache_ = stmtTableCache;
   }

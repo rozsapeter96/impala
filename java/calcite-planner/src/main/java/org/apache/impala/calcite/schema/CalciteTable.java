@@ -74,6 +74,10 @@ public class CalciteTable extends RelOptAbstractTable
 
   private final List<String> qualifiedTableName_;
 
+  // The catalog of the table if it was referenced with a catalog-qualified name
+  // ('catalog.db.tbl'), null otherwise. See setCatalog().
+  private String catalog_;
+
   private final List<Column> columns_;
 
   private final SimplifiedAnalyzer analyzer_;
@@ -126,10 +130,24 @@ public class CalciteTable extends RelOptAbstractTable
     }
   }
 
+  /**
+   * Sets the catalog of a table that was referenced with a catalog-qualified name. Its
+   * qualified name then starts with the catalog.
+   */
+  public void setCatalog(String catalog) { catalog_ = catalog; }
+
+  private List<String> withCatalog(List<String> qualifiedName) {
+    if (catalog_ == null) return qualifiedName;
+    List<String> result = new ArrayList<>(qualifiedName.size() + 1);
+    result.add(catalog_);
+    result.addAll(qualifiedName);
+    return result;
+  }
+
   public BaseTableRef createBaseTableRef(SimplifiedAnalyzer analyzer,
       TimeTravelSpec timeTravelSpec) throws ImpalaException {
 
-    TableRef tblRef = new TableRef(qualifiedTableName_, null);
+    TableRef tblRef = new TableRef(withCatalog(qualifiedTableName_), null);
 
     Path resolvedPath = analyzer.resolvePath(tblRef.getPath(), Path.PathType.TABLE_REF,
         timeTravelSpec);
@@ -157,7 +175,7 @@ public class CalciteTable extends RelOptAbstractTable
 
   @Override
   public List<String> getQualifiedName() {
-    return qualifiedTableName_;
+    return withCatalog(qualifiedTableName_);
   }
 
   @Override
