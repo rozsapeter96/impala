@@ -81,7 +81,7 @@ public class StmtMetadataLoader {
   private final long RETRY_LOAD_NUM_CATALOG_UPDATES = 20;
 
   private final Frontend fe_;
-  private final String sessionDb_;
+  private final QualifiedDbName sessionDb_;
   private final EventSequence timeline_;
   private final User user_;
   private final TUniqueId queryId_;
@@ -148,7 +148,7 @@ public class StmtMetadataLoader {
   public StmtMetadataLoader(Frontend fe, String sessionDb, EventSequence timeline,
       User user, TUniqueId queryId) {
     fe_ = Preconditions.checkNotNull(fe);
-    sessionDb_ = Preconditions.checkNotNull(sessionDb);
+    sessionDb_ = new QualifiedDbName(null, Preconditions.checkNotNull(sessionDb));
     timeline_ = timeline;
     user_ = user;
     queryId_ = queryId;
@@ -463,11 +463,16 @@ public class StmtMetadataLoader {
         continue;
       }
       loadedOrFailedTbls_.put(tblName, tbl);
+      // The definition of a view and the masking policies of a table refer to tables of
+      // the catalog of the view or table (the catalog it was referenced in, or no
+      // catalog). See Analyzer.setViewCatalog().
+      QualifiedDbName viewSessionDb = getViewSessionDb(tblName);
       if (tbl instanceof FeView) {
-        viewTbls.addAll(collectTableCandidates(((FeView) tbl).getQueryStmt()));
+        viewTbls.addAll(
+            collectTableCandidates(((FeView) tbl).getQueryStmt(), viewSessionDb));
       } else if (tbl instanceof MaterializedViewHdfsTable) {
         Set<TableName> mvSrcTableNames = collectTableCandidates(
-            ((MaterializedViewHdfsTable) tbl).getQueryStmt());
+            ((MaterializedViewHdfsTable) tbl).getQueryStmt(), viewSessionDb);
         ((MaterializedViewHdfsTable) tbl).addSrcTables(mvSrcTableNames);
         viewTbls.addAll(mvSrcTableNames);
       }
@@ -476,7 +481,7 @@ public class StmtMetadataLoader {
           && fe_.getAuthzFactory().getAuthorizationConfig().isEnabled()
           && fe_.getAuthzFactory().supportsTableMasking() && user_ != null) {
         try {
-          viewTbls.addAll(collectPolicyTables(tbl));
+          viewTbls.addAll(collectPolicyTables(tbl, viewSessionDb));
         } catch (Exception e) {
           LOG.error("Failed to collect policy tables for {}", tblName, e);
         }
@@ -490,6 +495,15 @@ public class StmtMetadataLoader {
   }
 
   /**
+   * Returns the session database (see Analyzer.getSessionDb()) for the definition of
+   * the view or the masking policies of the table 'tblName': the session database
+   * qualified with the catalog of 'tblName'.
+   */
+  private QualifiedDbName getViewSessionDb(TableName tblName) {
+    return new QualifiedDbName(tblName.getCatalog(), sessionDb_.getDb());
+  }
+
+  /**
    * Returns the set of tables whose metadata needs to be loaded for the analysis of the
    * given 'stmt' to succeed. This is done by collecting all table references from 'stmt'
    * and generating all possible table-path resolutions considered during analysis.
@@ -498,13 +512,21 @@ public class StmtMetadataLoader {
    * PathResolver.getCatalogQualifiedTable() if a path starts with a catalog name.
    */
   public Set<TableName> collectTableCandidates(StatementBase stmt) {
+    return collectTableCandidates(stmt, sessionDb_);
+  }
+
+  /**
+   * Like collectTableCandidates(stmt), but with 'sessionDb' instead of 'sessionDb_'.
+   */
+  private Set<TableName> collectTableCandidates(StatementBase stmt,
+      QualifiedDbName sessionDb) {
     Preconditions.checkNotNull(stmt);
     List<TableRef> tblRefs = new ArrayList<>();
     stmt.collectTableRefs(tblRefs);
     Set<TableName> tableNames = new HashSet<>();
     Set<String> catalogNames = null;
     for (TableRef ref: tblRefs) {
-      tableNames.addAll(PathResolver.getCandidateTables(ref.getPath(), sessionDb_));
+      tableNames.addAll(PathResolver.getCandidateTables(ref.getPath(), sessionDb));
       if (ref.getPath().size() < 3) continue;
       if (catalogNames == null) catalogNames = fe_.getCatalog().getCatalogNames();
       TableName catalogQualified =
@@ -514,8 +536,13 @@ public class StmtMetadataLoader {
     return tableNames;
   }
 
+  /**
+   * Returns the candidate tables of the column masking and row filtering policies of
+   * 'tbl'. 'sessionDb' is the session database used to resolve them, see
+   * getViewSessionDb().
+   */
   @VisibleForTesting
-  Set<TableName> collectPolicyTables(FeTable tbl)
+  Set<TableName> collectPolicyTables(FeTable tbl, QualifiedDbName sessionDb)
       throws InternalException, AnalysisException {
     if (tbl instanceof FeIncompleteTable) return Collections.emptySet();
     Set<TableName> tableNames = new HashSet<>();
@@ -531,13 +558,13 @@ public class StmtMetadataLoader {
             col.getName(), col.getType(), /*authzCtx*/ null);
         if (stmt == null) continue;
         needsAnyTableMasksInQuery_ = true;
-        tableNames.addAll(collectTableCandidates(stmt));
+        tableNames.addAll(collectTableCandidates(stmt, sessionDb));
       }
       // Use authzCtx=null to avoid audits and privilege checks.
       SelectStmt filterStmt = tableMask.createRowFilterStmt(/*authzCtx*/null);
       if (filterStmt != null) {
         needsAnyTableMasksInQuery_ = true;
-        tableNames.addAll(collectTableCandidates(filterStmt));
+        tableNames.addAll(collectTableCandidates(filterStmt, sessionDb));
       }
     }
     return tableNames;

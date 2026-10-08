@@ -21,6 +21,7 @@ import java.util.Arrays;
 
 import org.apache.impala.analysis.ParsedStatement;
 import org.apache.impala.analysis.ParsedStatementImpl;
+import org.apache.impala.analysis.QualifiedDbName;
 import org.apache.impala.analysis.StmtMetadataLoader.StmtTableCache;
 import org.apache.impala.authorization.NoopAuthorizationFactory;
 import org.apache.impala.authorization.User;
@@ -259,6 +260,7 @@ public class StmtMetadataLoaderTest {
     LocalDb db = new LocalDb(catalog, "default");
     mdLoader.collectPolicyTables(new FailedLoadLocalTable(
         db, "tbl", TImpalaTableType.TABLE, "comment",
-        new TableLoadingException("error", /*cause=*/new Exception())));
+        new TableLoadingException("error", /*cause=*/new Exception())),
+        new QualifiedDbName(null, Catalog.DEFAULT_DB));
   }
 }

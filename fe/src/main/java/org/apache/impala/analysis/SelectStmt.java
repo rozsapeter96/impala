@@ -39,6 +39,7 @@ import org.apache.impala.authorization.Privilege;
 import org.apache.impala.catalog.ArrayType;
 import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.DatabaseNotFoundException;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.catalog.FeIcebergTable;
 import org.apache.impala.catalog.FeIcebergTable.Utils;
 import org.apache.impala.catalog.FeKuduTable;
@@ -1536,9 +1537,16 @@ public class SelectStmt extends QueryStmt {
     if (tableRef.getSampleParams() != null) return;
 
     TableName tableName = tableRef.getDesc().getTableName();
+    // Look up the table in the catalog it was resolved in, see Path.getRootCatalog().
+    FeCatalog catalog = analyzer_.getCatalog();
+    String rootCatalog = tableRef.getResolvedPath().getRootCatalog();
+    if (rootCatalog != null) {
+      catalog = catalog.getCatalog(rootCatalog);
+      if (catalog == null) return;
+    }
     FeTable table;
     try {
-      table = analyzer_.getCatalog().getTable(tableName.getDb(), tableName.getTbl());
+      table = catalog.getTable(tableName.getDb(), tableName.getTbl());
     } catch (DatabaseNotFoundException e) {
       throw new AnalysisException(
           Analyzer.DB_DOES_NOT_EXIST_ERROR_MSG + tableName.getDb(), e);

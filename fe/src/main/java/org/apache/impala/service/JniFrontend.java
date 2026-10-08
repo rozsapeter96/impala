@@ -331,6 +331,7 @@ public class JniFrontend {
 
     Preconditions.checkState(!params.isSetSession() || user != null );
     List<String> tables = frontend_.getTableNames(params.db,
+        params.isSetCatalog() ? params.catalog : null,
         PatternMatcher.createHivePatternMatcher(params.pattern), user,
         params.getTable_types());
 
@@ -780,7 +781,8 @@ public class JniFrontend {
     Preconditions.checkNotNull(frontend_);
     TTableName tableName = new TTableName();
     JniUtil.deserializeThrift(protocolFactory_, tableName, tableNameParam);
-    return frontend_.getCatalog().getTable(tableName.db_name, tableName.table_name);
+    // The database may be qualified with a catalog, see IcebergMetadataScanNode.
+    return frontend_.getTable(tableName);
   }
 
   // Caching this saves ~50ms per call to getHadoopConfig

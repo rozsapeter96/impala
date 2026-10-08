@@ -238,6 +238,12 @@ public class Analyzer {
   // Flag indicating whether this analyzer belongs to a WITH clause view.
   private boolean hasWithClause_ = false;
 
+  // If set, replaces the session database of getSessionDb(): the session database
+  // qualified with the catalog of the view, for the analyzer of the definition of a
+  // catalog view or of a table masking view, see setViewCatalog(). Nested analyzers
+  // inherit it.
+  private QualifiedDbName viewSessionDb_ = null;
+
   // If set, when masked privilege requests are registered they will use this error
   // error message.
   private String authErrorMsg_;
@@ -1015,6 +1021,7 @@ public class Analyzer {
     maskPrivChecks_ = parentAnalyzer.maskPrivChecks_;
     enablePrivChecks_ = parentAnalyzer.enablePrivChecks_;
     hasWithClause_ = parentAnalyzer.hasWithClause_;
+    viewSessionDb_ = parentAnalyzer.viewSessionDb_;
   }
 
   /**
@@ -1197,7 +1204,7 @@ public class Analyzer {
     }
     // Try to find a matching local view.
     FeView localView = getPathResolver().resolveLocalView(tableRef.getPath());
-    if (localView != null) return new InlineViewRef(localView, tableRef);
+    if (localView != null) return new InlineViewRef(localView, tableRef, null);
 
     // Resolve the table ref's path and determine what resolved table ref
     // to replace it with.
@@ -1234,7 +1241,9 @@ public class Analyzer {
   private TableRef createResolvedTableRef(TableRef tableRef, Path resolvedPath) {
     if (resolvedPath.destTable() != null) {
       FeTable table = resolvedPath.destTable();
-      if (table instanceof FeView) return new InlineViewRef((FeView) table, tableRef);
+      if (table instanceof FeView) {
+        return new InlineViewRef((FeView) table, tableRef, resolvedPath.getRootCatalog());
+      }
       if (table instanceof IcebergMetadataTable) {
         return new IcebergMetadataTableRef(tableRef, resolvedPath);
       }
@@ -3607,6 +3616,28 @@ public class Analyzer {
 
   public String getDefaultDb() { return globalState_.queryCtx.session.database; }
 
+  /**
+   * Returns the session database ('USE db') in which names that are not qualified with
+   * a database are resolved. It has no catalog: names that are not catalog-qualified
+   * are resolved in all catalogs. In the analyzer of a view definition (see
+   * setViewCatalog()), it is qualified with the catalog of the view.
+   */
+  public QualifiedDbName getSessionDb() {
+    if (viewSessionDb_ != null) return viewSessionDb_;
+    return new QualifiedDbName(null, getDefaultDb());
+  }
+
+  /**
+   * Makes this analyzer resolve names that are not catalog-qualified in 'catalog'.
+   * Called for the analyzer of the definition of a catalog view, and of a table masking
+   * view, with the catalog the view or masked table was referenced in: 'catalog' is
+   * null if it was referenced without a catalog. The definition of a view only refers to
+   * tables of its own catalog.
+   */
+  public void setViewCatalog(String catalog) {
+    viewSessionDb_ = new QualifiedDbName(catalog, getDefaultDb());
+  }
+
   public String getFallbackDbForFunctions() {
     return getQueryCtx()
         .getClient_request()
@@ -3963,24 +3994,43 @@ public class Analyzer {
    */
   public FeDb getDb(String dbName, Privilege privilege, boolean throwIfDoesNotExist,
       boolean requireGrantOption) throws AnalysisException {
+    return getDb(new QualifiedDbName(null, dbName), privilege, throwIfDoesNotExist,
+        requireGrantOption);
+  }
+
+  /**
+   * Like getDb(String, Privilege), for a database that may be qualified with a catalog
+   * ('SHOW TABLES IN catalog.db'). A database without a catalog is
+   * looked up in all catalogs. Privileges are checked on the database name without its
+   * catalog.
+   */
+  public FeDb getDb(QualifiedDbName dbName, Privilege privilege)
+      throws AnalysisException {
+    return getDb(dbName, privilege, true, false);
+  }
+
+  public FeDb getDb(QualifiedDbName dbName, Privilege privilege,
+      boolean throwIfDoesNotExist, boolean requireGrantOption)
+      throws AnalysisException {
     // Do not throw until the privileges are registered.
     FeDb db = getDb(dbName, /*throwIfDoesNotExist*/ false);
+    String privDbName = dbName.getDb();
     registerPrivReq(builder -> {
       if (requireGrantOption) {
         builder.grantOption();
       }
       if (privilege == Privilege.ANY) {
         String dbOwner = db == null ? null : db.getOwnerUser();
-        return builder.any().onDb(dbName, dbOwner).build();
+        return builder.any().onDb(privDbName, dbOwner).build();
       } else if (db == null) {
         // Db does not exist, register a privilege request based on the DB name.
-        return builder.allOf(privilege).onDb(dbName, null).build();
+        return builder.allOf(privilege).onDb(privDbName, null).build();
       }
       return builder.allOf(privilege).onDb(db).build();
     });
     // Propagate the exception if needed.
     FeDb retDb = getDb(dbName, throwIfDoesNotExist);
-    addAccessEvent(new TAccessEvent(dbName, TCatalogObjectType.DATABASE,
+    addAccessEvent(new TAccessEvent(privDbName, TCatalogObjectType.DATABASE,
         privilege.toString()));
     return retDb;
   }
@@ -3991,6 +4041,21 @@ public class Analyzer {
   public FeDb getDb(String dbName, boolean throwIfDoesNotExist)
       throws AnalysisException {
     FeDb db = getCatalog().getDb(dbName);
+    if (db == null && throwIfDoesNotExist) {
+      throw new AnalysisException(DB_DOES_NOT_EXIST_ERROR_MSG + dbName);
+    }
+    return db;
+  }
+
+  /**
+   * Returns the database 'dbName' of its catalog, or of any catalog if it is not
+   * qualified with a catalog, without checking for privileges.
+   */
+  public FeDb getDb(QualifiedDbName dbName, boolean throwIfDoesNotExist)
+      throws AnalysisException {
+    if (dbName.getCatalog() == null) return getDb(dbName.getDb(), throwIfDoesNotExist);
+    FeCatalog catalog = getCatalog().getCatalog(dbName.getCatalog());
+    FeDb db = catalog == null ? null : catalog.getDb(dbName.getDb());
     if (db == null && throwIfDoesNotExist) {
       throw new AnalysisException(DB_DOES_NOT_EXIST_ERROR_MSG + dbName);
     }
@@ -4058,7 +4123,7 @@ public class Analyzer {
    * is already fully qualified, returns tableName.
    */
   public TableName getFqTableName(TableName tableName) {
-    return PathResolver.getFqTableName(tableName, getDefaultDb());
+    return PathResolver.getFqTableName(tableName, getSessionDb());
   }
 
   public void setMaskPrivChecks(String errMsg) {

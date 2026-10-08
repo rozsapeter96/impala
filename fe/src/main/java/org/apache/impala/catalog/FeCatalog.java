@@ -52,11 +52,11 @@ public interface FeCatalog {
   }
 
   /**
-   * Returns the catalog with the given name, which contains only the dbs and tables of
-   * that catalog, or null if there is no such catalog.
+   * Returns the catalog with the given name (case-insensitive), which contains only the
+   * dbs and tables of that catalog, or null if there is no such catalog.
    */
   default @Nullable FeCatalog getCatalog(String catalogName) {
-    return DEFAULT_CATALOG.equals(catalogName) ? this : null;
+    return DEFAULT_CATALOG.equalsIgnoreCase(catalogName) ? this : null;
   }
 
   /** @see Catalog#getDbs(PatternMatcher) */

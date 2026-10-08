@@ -147,6 +147,7 @@ public class FrontendFixture {
   public void tearDown() {
     clearTestTables();
     clearTestDbs();
+    catalog_.clearTestCatalogNames();
   }
 
   public Frontend frontend() { return frontend_; }

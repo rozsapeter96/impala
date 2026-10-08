@@ -457,8 +457,9 @@ Status ClientRequestState::ExecLocalCatalogOp(
           params->__isset.show_pattern ? &(params->show_pattern) : nullptr;
       TGetTablesResult table_names;
       const set<TImpalaTableType::type>& table_types = params->table_types;
+      const string* catalog = params->__isset.catalog ? &(params->catalog) : nullptr;
       RETURN_IF_ERROR(frontend_->GetTableNames(params->db, table_name_pattern,
-          &query_ctx_.session, table_types, &table_names));
+          &query_ctx_.session, table_types, &table_names, catalog));
       SetResultSet(table_names.tables);
       return Status::OK();
     }

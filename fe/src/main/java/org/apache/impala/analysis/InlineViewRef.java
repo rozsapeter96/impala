@@ -51,6 +51,11 @@ public class InlineViewRef extends TableRef {
   // Null for inline views parsed directly from a query string.
   private final FeView view_;
 
+  // For catalog views and table masking views: the catalog that the view or the masked
+  // table was referenced in, null if it was referenced without a catalog. The view
+  // definition is analyzed in this catalog, see Analyzer.setViewCatalog().
+  private String viewCatalog_ = null;
+
   // If not null, these will serve as the column labels for the inline view. This provides
   // a layer of separation between column labels visible from outside the inline view
   // and column labels used in the query definition. Either all or none of the column
@@ -104,11 +109,13 @@ public class InlineViewRef extends TableRef {
   }
 
   /**
-   * C'tor for creating inline views that replace a local or catalog view ref.
+   * C'tor for creating inline views that replace a local or catalog view ref. For a
+   * catalog view, 'viewCatalog' is the catalog of the resolved path of 'origTblRef'.
    */
-  public InlineViewRef(FeView view, TableRef origTblRef) {
+  public InlineViewRef(FeView view, TableRef origTblRef, String viewCatalog) {
     super(view.getTableName().toPath(), origTblRef.getExplicitAlias(),
         origTblRef.getPrivilege(), origTblRef.requireGrantOption());
+    viewCatalog_ = viewCatalog;
     queryStmt_ = view.getQueryStmt().clone();
     queryStmt_.reset();
     if (view.isLocalView()) queryStmt_.reset();
@@ -132,6 +139,7 @@ public class InlineViewRef extends TableRef {
     super(other);
     Preconditions.checkNotNull(other.queryStmt_);
     view_ = other.view_;
+    viewCatalog_ = other.viewCatalog_;
     queryStmt_ = other.queryStmt_.clone();
     inlineViewAnalyzer_ = other.inlineViewAnalyzer_;
     if (other.explicitColLabels_ != null) {
@@ -188,6 +196,10 @@ public class InlineViewRef extends TableRef {
         (TableSampleClause) null);
     tableRef.migratePropertiesTo(viewRef);
     viewRef.isTableMaskingView_ = true;
+    // Tables of the masking policies are resolved in the catalog of the masked table.
+    viewRef.viewCatalog_ = tableRef instanceof InlineViewRef ?
+        ((InlineViewRef) tableRef).viewCatalog_ :
+        tableRef.getResolvedPath().getRootCatalog();
     if (LOG.isTraceEnabled()) {
       LOG.trace("Replacing '{}' with subquery: {}", tableRef.toSql(),
           tableMaskStmt.toSql());
@@ -207,6 +219,11 @@ public class InlineViewRef extends TableRef {
 
     // Analyze the inline view query statement with its own analyzer
     inlineViewAnalyzer_ = new Analyzer(analyzer);
+    // The definition of a catalog view and the policies of a table masking view refer
+    // to tables of the catalog of the view.
+    if (isCatalogView() || isTableMaskingView_) {
+      inlineViewAnalyzer_.setViewCatalog(viewCatalog_);
+    }
 
     // Catalog views refs require special analysis settings for authorization.
     if (isCatalogView()) {

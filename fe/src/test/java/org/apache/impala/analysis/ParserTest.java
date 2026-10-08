@@ -2073,6 +2073,8 @@ public class ParserTest extends FrontendTestBase {
     ParserError("USE");
     ParserError("USE db1 db2");
     ParsesOk("USE db1");
+    ParserError("USE cat1.db1");
+    ParserError("USE cat1.db1.tbl1");
   }
 
   @Test
@@ -2182,10 +2184,13 @@ public class ParserTest extends FrontendTestBase {
     // Malformed pattern (no quotes)
     ParserError("SHOW TABLES tablename");
     ParserError("SHOW VIEWS tablename");
-    // Missing keyword METADATA when listing metadata tables
-    ParserError("SHOW TABLES IN db.tbl");
+    // Databases can be qualified with a catalog (IMPALA-13698), so this lists the
+    // tables of database 'tbl' of catalog 'db'.
+    ParsesOk("SHOW TABLES IN db.tbl");
+    ParserError("SHOW TABLES IN cat.db.tbl");
     // Trying to list the metadata tables of a metadata table
     ParserError("SHOW METADATA TABLES IN db.tbl.files");
+    ParserError("SHOW METADATA TABLES IN cat.db.tbl.files");
     // Invalid SHOW DATA SOURCE statements
     ParserError("SHOW DATA");
     ParserError("SHOW SOURCE");
@@ -3768,10 +3773,13 @@ public class ParserTest extends FrontendTestBase {
     ParsesOk("refresh authorization");
 
     ParserError("invalidate");
-    ParserError("invalidate metadata Foo.S.S");
+    // Catalog-qualified table name (IMPALA-13698).
+    ParsesOk("invalidate metadata Foo.S.S");
+    ParserError("invalidate metadata Foo.S.S.S");
     ParserError("invalidate metadata partition (col=2)");
     ParserError("invalidate metadata Foo.S partition (col=2)");
-    ParserError("REFRESH Foo.S.S");
+    ParsesOk("REFRESH Foo.S.S");
+    ParserError("REFRESH Foo.S.S.S");
     ParserError("refresh");
     ParserError("refresh Foo.S partition (col1 = 2, col2)");
     ParserError("refresh Foo.S partition ()");

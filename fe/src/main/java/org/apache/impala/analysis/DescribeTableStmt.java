@@ -29,6 +29,7 @@ import org.apache.impala.catalog.iceberg.IcebergMetadataTable;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.thrift.TDescribeOutputStyle;
 import org.apache.impala.thrift.TDescribeTableParams;
+import org.apache.impala.thrift.TTableName;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
@@ -181,7 +182,11 @@ public class DescribeTableStmt extends StatementBase {
       params.setResult_struct(resultStruct_.toThrift());
     } else {
       Preconditions.checkNotNull(table_);
-      params.setTable_name(table_.getTableName().toThrift());
+      TTableName tableName = table_.getTableName().toThrift();
+      // Keep the catalog of catalog-qualified names, so that the table is looked up in
+      // its catalog when the statement is executed. See Frontend.doDescribeTable().
+      if (path_.getRootCatalog() != null) tableName.setCatalog(path_.getRootCatalog());
+      params.setTable_name(tableName);
       if (table_ instanceof IcebergMetadataTable) {
         params.setMetadata_table_name(((IcebergMetadataTable)table_).
             getMetadataTableName());

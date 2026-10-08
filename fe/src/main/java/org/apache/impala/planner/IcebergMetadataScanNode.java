@@ -81,8 +81,14 @@ public class IcebergMetadataScanNode extends ScanNode {
   protected void toThrift(TPlanNode msg) {
     msg.iceberg_scan_metadata_node = new TIcebergMetadataScanNode();
     msg.node_type = TPlanNodeType.ICEBERG_METADATA_SCAN_NODE;
-    msg.iceberg_scan_metadata_node.table_name =
+    // Keep the catalog of a catalog-qualified table name, so that the backend gets the
+    // table from that catalog (JniFrontend.getCatalogTable()).
+    TTableName tableName =
         new TTableName(desc_.getTableName().getDb(), desc_.getTableName().getTbl());
+    if (desc_.getPath() != null && desc_.getPath().getRootCatalog() != null) {
+      tableName.setCatalog(desc_.getPath().getRootCatalog());
+    }
+    msg.iceberg_scan_metadata_node.table_name = tableName;
     msg.iceberg_scan_metadata_node.metadata_table_name = metadataTableName_;
     msg.iceberg_scan_metadata_node.tuple_id = desc_.getId().asInt();
   }

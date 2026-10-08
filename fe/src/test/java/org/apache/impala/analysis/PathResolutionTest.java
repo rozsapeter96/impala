@@ -124,7 +124,8 @@ public class PathResolutionTest extends FrontendTestBase {
 
   private void assertCandidates(List<String> path, String sessionDb,
       String... expected) {
-    List<TableName> candidates = PathResolver.getCandidateTables(path, sessionDb);
+    List<TableName> candidates =
+        PathResolver.getCandidateTables(path, new QualifiedDbName(null, sessionDb));
     String[] actual = new String[candidates.size()];
     for (int i = 0; i < candidates.size(); ++i) {
       TableName t = candidates.get(i);
@@ -407,9 +408,6 @@ public class PathResolutionTest extends FrontendTestBase {
         .getViewStmt();
     assertEquals("CollectionTableRef table:default.pathdb.t path:arr",
         describe(inner.getTableRefs().get(0)));
-    // Statements that take a 'table_name' accept at most two parts.
-    AnalysisError("drop table default.pathdb.t", "Syntax error in line 1");
-    AnalysisError("compute stats default.pathdb.t", "Syntax error in line 1");
   }
 
   /**
@@ -438,5 +436,116 @@ public class PathResolutionTest extends FrontendTestBase {
     addTestTable("create table x.`default` (pathdb struct<t:array<int>>)");
     AnalysisError("select 1 from default.pathdb.t", createAnalysisCtx("x"),
         "Table reference is ambiguous: 'default.pathdb.t'");
+  }
+
+  /**
+   * Statements that take a table name ('table_name'): the number of parts decides,
+   * 'tbl' is in the session database, 'db.tbl' in database 'db', 'catalog.db.tbl' in
+   * catalog 'catalog'. Only queries, DESCRIBE, SHOW TABLES and INSERT support catalogs
+   * other than 'default'.
+   */
+  @Test
+  public void TestCatalogQualifiedTableNames() {
+    addTestTables();
+    addTestCatalogName("other");
+    // The default catalog works with all statements.
+    AnalyzesOk("drop table default.pathdb.t");
+    AnalyzesOk("truncate table default.pathdb.t");
+    AnalyzesOk("show create table default.pathdb.t");
+    AnalyzesOk("show column stats default.pathdb.t");
+    AnalyzesOk("insert into default.functional.alltypesnopart (int_col) values (1)");
+    AnalyzesOk("comment on table default.pathdb.t is 'c'");
+    AnalyzesOk("show metadata tables in default." + ICE_TBL);
+    // Other catalogs only work with INSERT (and queries, DESCRIBE, SHOW TABLES).
+    AnalyzesOk("insert into other.functional.alltypesnopart (int_col) values (1)");
+    AnalyzesOk("insert into other.functional.alltypesnopart (int_col) " +
+        "select id from other.pathdb.t");
+    String otherCatalogError = "Table other.pathdb.t is in catalog 'other'. This " +
+        "statement only supports tables of the 'default' catalog.";
+    AnalysisError("drop table other.pathdb.t", otherCatalogError);
+    AnalysisError("compute stats other.pathdb.t", otherCatalogError);
+    AnalysisError("refresh other.pathdb.t", otherCatalogError);
+    AnalysisError("invalidate metadata other.pathdb.t", otherCatalogError);
+    AnalysisError("show create table other.pathdb.t", otherCatalogError);
+    AnalysisError("create table other.pathdb.t2 (i int)",
+        "Table other.pathdb.t2 is in catalog 'other'.");
+    AnalysisError("create table pathdb.t2 like other.pathdb.t", otherCatalogError);
+    AnalysisError("alter table pathdb.t rename to other.pathdb.t3",
+        "Table other.pathdb.t3 is in catalog 'other'.");
+    AnalysisError("drop table nope.pathdb.t", "Catalog does not exist: nope");
+    // Unqualified names and a global INVALIDATE METADATA are not affected.
+    AnalyzesOk("drop table pathdb.t");
+    AnalyzesOk("invalidate metadata");
+    // Collision of a database and a catalog name: two parts are always 'db.tbl'.
+    addTestDb("other", null);
+    addTestTable("create table other.t (i int)");
+    AnalyzesOk("drop table other.t");
+    AnalysisError("drop table other.other.t",
+        "Table other.other.t is in catalog 'other'.");
+  }
+
+  /**
+   * Asserts what the first table ref of the catalog view in the FROM clause of 'stmt'
+   * resolves to.
+   */
+  private void assertViewTableRef(String stmt, String sessionDb, String expected) {
+    SelectStmt select = analyzeSelect(stmt, sessionDb);
+    TableRef ref = select.getTableRefs().get(0);
+    assertTrue(stmt, ref instanceof InlineViewRef);
+    SelectStmt inner = (SelectStmt) ((InlineViewRef) ref).getViewStmt();
+    assertEquals(stmt, expected, describe(inner.getTableRefs().get(0)));
+  }
+
+  /**
+   * The definition of a catalog view is resolved in the catalog that the view was
+   * referenced in.
+   */
+  @Test
+  public void TestViewCatalog() {
+    addTestTables();
+    addTestCatalogName("other");
+    addTestView("create view pathdb.v as select id from pathdb.t");
+    addTestView("create view pathdb.w as select id from pathdb.v");
+    // Without a catalog, the tables of the view are looked up without a catalog.
+    assertViewTableRef("select id from pathdb.v", null,
+        "BaseTableRef table:pathdb.t path:");
+    assertViewTableRef("select id from v", "pathdb", "BaseTableRef table:pathdb.t path:");
+    // A catalog-qualified view is resolved in its catalog.
+    assertViewTableRef("select id from default.pathdb.v", null,
+        "BaseTableRef table:default.pathdb.t path:");
+    assertViewTableRef("select id from other.pathdb.v", "pathdb",
+        "BaseTableRef table:other.pathdb.t path:");
+    // Nested views: the catalog of the outer view applies to the inner view.
+    SelectStmt select = analyzeSelect("select id from other.pathdb.w", null);
+    SelectStmt w = (SelectStmt) ((InlineViewRef) select.getTableRefs().get(0))
+        .getViewStmt();
+    SelectStmt v = (SelectStmt) ((InlineViewRef) w.getTableRefs().get(0)).getViewStmt();
+    assertEquals("BaseTableRef table:other.pathdb.t path:",
+        describe(v.getTableRefs().get(0)));
+    // The catalog of the view does not apply outside of the view.
+    select = analyzeSelect("select v.id from other.pathdb.v, t", "pathdb");
+    assertEquals("BaseTableRef table:pathdb.t path:",
+        describe(select.getTableRefs().get(1)));
+  }
+
+  /** SHOW TABLES/VIEWS IN [catalog.]db. */
+  @Test
+  public void TestShowTablesInCatalog() {
+    addTestTables();
+    addTestCatalogName("other");
+    assertEquals("other.pathdb",
+        ((ShowTablesStmt) AnalyzesOk("show tables in other.pathdb")).getDb().toString());
+    assertEquals("default.pathdb",
+        ((ShowTablesStmt) AnalyzesOk("show tables in default.pathdb like 't*'"))
+        .getDb().toString());
+    AnalyzesOk("show views in other.pathdb");
+    assertEquals("SHOW TABLES IN other.pathdb LIKE 't*'",
+        AnalyzesOk("show tables in other.pathdb like 't*'").toSql());
+    AnalysisError("show tables in nope.pathdb",
+        "Database does not exist: nope.pathdb");
+    AnalysisError("show tables in other.nope", "Database does not exist: other.nope");
+    // Without a database, the session database is used.
+    assertEquals("pathdb", ((ShowTablesStmt) AnalyzesOk("show tables",
+        createAnalysisCtx("pathdb"))).getDb().toString());
   }
 }

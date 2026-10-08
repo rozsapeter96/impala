@@ -100,7 +100,8 @@ public class LocalCatalog implements FeCatalog {
     }
     if (metaProvider instanceof MultiMetaProvider) {
       catalogProviders_ = ((MultiMetaProvider) metaProvider).getCatalogProviders();
-    } else if (metaProvider.getCatalogName() != null) {
+    } else if (metaProvider.getCatalogName() != null
+        && !metaProvider.getCatalogName().contains(".")) {
       catalogProviders_ = Collections.singletonMap(
           metaProvider.getCatalogName().toLowerCase(), metaProvider);
     } else {
@@ -115,10 +116,12 @@ public class LocalCatalog implements FeCatalog {
 
   @Override
   public FeCatalog getCatalog(String catalogName) {
-    MetaProvider provider = catalogProviders_.get(catalogName);
+    if (catalogName == null) return null;
+    String name = catalogName.toLowerCase();
+    MetaProvider provider = catalogProviders_.get(name);
     if (provider == null) return null;
     if (provider == metaProvider_) return this;
-    return catalogs_.computeIfAbsent(catalogName, n -> new LocalCatalog(provider));
+    return catalogs_.computeIfAbsent(name, n -> new LocalCatalog(provider));
   }
 
   public String getProviderURI() {

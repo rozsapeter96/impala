@@ -75,6 +75,17 @@ import org.apache.impala.common.NotImplementedException;
 parser code {:
   private Symbol errorToken_;
 
+  // The table names parsed with the rules 'table_name' and 'column_name', see
+  // StatementBase.getParsedTableNames().
+  private final List<TableName> parsedTableNames_ = new ArrayList<>();
+
+  TableName registerTableName(TableName tableName) {
+    parsedTableNames_.add(tableName);
+    return tableName;
+  }
+
+  public List<TableName> getParsedTableNames() { return parsedTableNames_; }
+
   // Set if the errorToken_ to be printed in the error message has a different name, e.g.
   // when parsing identifiers instead of defined keywords. This is necessary to avoid
   // conflicting keywords.
@@ -382,6 +393,7 @@ terminal KW_CLUSTERED, KW_BUCKETS;
 // An identifier or an "unreserved keyword". An unreserved keyword is a keyword that can
 // also be used as an identifier.
 nonterminal String ident_or_unreserved;
+nonterminal QualifiedDbName qualified_db_name;
 // A word is an arbitrary token composed of digits and at least one letter. Reserved
 // words cannot be used as identifiers but they are words and can be used in query
 // options, column attributes, etc.
@@ -3238,19 +3250,18 @@ show_tables_stmt ::=
   {: RESULT = new ShowTablesStmt(); :}
   | KW_SHOW KW_TABLES show_pattern:showPattern
   {: RESULT = new ShowTablesStmt(showPattern); :}
-  | KW_SHOW KW_TABLES KW_IN ident_or_unreserved:db
+  | KW_SHOW KW_TABLES KW_IN qualified_db_name:db
   {: RESULT = new ShowTablesStmt(db, null); :}
-  | KW_SHOW KW_TABLES KW_IN ident_or_unreserved:db show_pattern:showPattern
+  | KW_SHOW KW_TABLES KW_IN qualified_db_name:db show_pattern:showPattern
   {: RESULT = new ShowTablesStmt(db, showPattern); :}
   ;
 
 show_metadata_tables_stmt ::=
   KW_SHOW KW_METADATA KW_TABLES KW_IN table_name:tbl_name
-  {: RESULT = new ShowMetadataTablesStmt(tbl_name.getDb(), tbl_name.getTbl(), null); :}
+  {: RESULT = new ShowMetadataTablesStmt(tbl_name, null); :}
   | KW_SHOW KW_METADATA KW_TABLES KW_IN table_name:tbl_name
       show_pattern:showPattern
-  {: RESULT = new ShowMetadataTablesStmt(
-      tbl_name.getDb(), tbl_name.getTbl(), showPattern); :}
+  {: RESULT = new ShowMetadataTablesStmt(tbl_name, showPattern); :}
   ;
 
 show_views_stmt ::=
@@ -3258,10 +3269,18 @@ show_views_stmt ::=
   {: RESULT = new ShowViewsStmt(); :}
   | KW_SHOW KW_VIEWS show_pattern:showPattern
   {: RESULT = new ShowViewsStmt(showPattern); :}
-  | KW_SHOW KW_VIEWS KW_IN ident_or_unreserved:db
+  | KW_SHOW KW_VIEWS KW_IN qualified_db_name:db
   {: RESULT = new ShowViewsStmt(db, null); :}
-  | KW_SHOW KW_VIEWS KW_IN ident_or_unreserved:db show_pattern:showPattern
+  | KW_SHOW KW_VIEWS KW_IN qualified_db_name:db show_pattern:showPattern
   {: RESULT = new ShowViewsStmt(db, showPattern); :}
+  ;
+
+// A database name, optionally qualified with a catalog: 'db' or 'catalog.db'.
+qualified_db_name ::=
+  ident_or_unreserved:db
+  {: RESULT = new QualifiedDbName(null, db); :}
+  | ident_or_unreserved:catalog DOT ident_or_unreserved:db
+  {: RESULT = new QualifiedDbName(catalog, db); :}
   ;
 
 show_dbs_stmt ::=
@@ -3523,16 +3542,22 @@ star_expr ::=
 
 table_name ::=
   ident_or_unreserved:tbl
-  {: RESULT = new TableName(null, tbl); :}
+  {: RESULT = parser.registerTableName(new TableName(null, tbl)); :}
   | ident_or_unreserved:db DOT ident_or_unreserved:tbl
-  {: RESULT = new TableName(db, tbl); :}
+  {: RESULT = parser.registerTableName(new TableName(db, tbl)); :}
+  | ident_or_unreserved:catalog DOT ident_or_unreserved:db DOT ident_or_unreserved:tbl
+  {: RESULT = parser.registerTableName(new TableName(catalog, db, tbl, null)); :}
   ;
 
 column_name ::=
   | ident_or_unreserved:tbl DOT ident_or_unreserved:col
-  {: RESULT = new ColumnName(new TableName(null, tbl), col); :}
+  {:
+    RESULT = new ColumnName(parser.registerTableName(new TableName(null, tbl)), col);
+  :}
   | ident_or_unreserved:db DOT ident_or_unreserved:tbl DOT ident_or_unreserved:col
-  {: RESULT = new ColumnName(new TableName(db, tbl), col); :}
+  {:
+    RESULT = new ColumnName(parser.registerTableName(new TableName(db, tbl)), col);
+  :}
   ;
 
 function_name ::=

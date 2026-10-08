@@ -129,6 +129,14 @@ public class FrontendTestBase extends AbstractFrontendTest {
    * Returns the new dummy table.
    * The test tables are registered in testTables_ and removed in the @After method.
    */
+  /**
+   * Adds a catalog name that table names can be qualified with. The catalog has the
+   * same dbs and tables as the default catalog. Removed in the @After method.
+   */
+  protected void addTestCatalogName(String name) {
+    feFixture_.catalog().addTestCatalogName(name);
+  }
+
   protected Table addTestTable(String createTableSql) {
     return feFixture_.addTestTable(createTableSql);
   }

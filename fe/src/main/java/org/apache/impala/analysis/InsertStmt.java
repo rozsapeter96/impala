@@ -457,10 +457,7 @@ public class InsertStmt extends DmlStatementBase {
     // One example use case is CREATE TABLE AS SELECT which must run analysis on the
     // INSERT before the table has actually been created.
     if (table_ == null) {
-      if (!targetTableName_.isFullyQualified()) {
-        targetTableName_ =
-            new TableName(analyzer.getDefaultDb(), targetTableName_.getTbl());
-      }
+      targetTableName_ = analyzer.getFqTableName(targetTableName_);
       table_ = analyzer.getTable(targetTableName_, privilegeRequired);
     } else {
       targetTableName_ = new TableName(table_.getDb().getName(), table_.getName());
@@ -1155,6 +1152,14 @@ public class InsertStmt extends DmlStatementBase {
   public void setWriteId(long writeId) { this.writeId_ = writeId; }
   public boolean isOverwrite() { return overwrite_; }
   public boolean isUpsert() { return isUpsert_; }
+
+  /**
+   * The target table is looked up from its catalog, and Iceberg REST tables are
+   * finalized through the catalog of the table, so INSERT supports tables of any
+   * catalog. Unsupported operations are rejected by Analyzer.checkTableCapability().
+   */
+  @Override
+  public boolean supportsNonDefaultCatalogs() { return true; }
 
   @Override
   public TSortingOrder getSortingOrder() { return sortingOrder_; }

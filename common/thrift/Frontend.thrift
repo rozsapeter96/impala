@@ -99,6 +99,10 @@ struct TGetTablesParams {
   // This specifies the types of tables that should be returned. If not set, all types of
   // tables are considered when their names are matched against pattern.
   4: optional set<CatalogService.TImpalaTableType> table_types = []
+
+  // The catalog of 'db' if the database was qualified with a catalog. If not set, 'db'
+  // is looked up in all catalogs.
+  5: optional string catalog
 }
 
 // Arguments to getMetadataTableNames, which returns the list of metadata tables of the
@@ -309,6 +313,10 @@ struct TShowTablesParams {
   // Optional pattern to match tables names. If not set, all tables from the given
   // database are returned.
   3: optional string show_pattern
+
+  // The catalog of 'db' if the database was qualified with a catalog
+  // (SHOW TABLES IN catalog.db). See TGetTablesParams.catalog.
+  5: optional string catalog
 
   // This specifies the types of tables that should be returned. If not set, all types of
   // tables are considered when their names are matched against pattern.

@@ -98,6 +98,7 @@ import org.apache.impala.analysis.InsertStmt;
 import org.apache.impala.analysis.OptimizeStmt;
 import org.apache.impala.analysis.ParsedStatement;
 import org.apache.impala.analysis.PathResolver;
+import org.apache.impala.analysis.QualifiedDbName;
 import org.apache.impala.analysis.Parser;
 import org.apache.impala.analysis.QueryStmt;
 import org.apache.impala.analysis.ResetMetadataStmt;
@@ -1341,11 +1342,27 @@ public class Frontend {
    */
   public List<String> getTableNames(String dbName, PatternMatcher matcher, User user,
       Set<TImpalaTableType> tableTypes) throws ImpalaException {
+    return getTableNames(dbName, /*catalogName*/ null, matcher, user, tableTypes);
+  }
+
+  /**
+   * Like getTableNames(dbName, matcher, user, tableTypes) for the database 'dbName' of
+   * catalog 'catalogName' ('SHOW TABLES IN catalog.db'). If
+   * 'catalogName' is null, 'dbName' is looked up in all catalogs. Returns an empty list
+   * if the catalog doesn't exist.
+   */
+  public List<String> getTableNames(String dbName, String catalogName,
+      PatternMatcher matcher, User user, Set<TImpalaTableType> tableTypes)
+      throws ImpalaException {
     RetryTracker retries = new RetryTracker(
         String.format("fetching %s table names", dbName));
     while (true) {
       try {
         FeCatalog catalog = getCatalog();
+        if (catalogName != null) {
+          catalog = catalog.getCatalog(catalogName);
+          if (catalog == null) return Collections.emptyList();
+        }
         List<String> tblNames = catalog.getTableNames(dbName, matcher, tableTypes);
         filterTablesIfAuthNeeded(dbName, user, tblNames);
         return tblNames;
@@ -1984,11 +2001,30 @@ public class Frontend {
     return authFilteredColumns;
   }
 
+  /**
+   * Returns the table 'tableName' of the catalog. If 'tableName' has a catalog, the
+   * table is looked up in that catalog. Used for table names that are sent to the
+   * backend and back, so that catalog-qualified table names keep referring to the table
+   * of their catalog.
+   */
+  public FeTable getTable(TTableName tableName) throws ImpalaException {
+    FeCatalog catalog = getCatalog();
+    if (tableName.isSetCatalog()) {
+      catalog = catalog.getCatalog(tableName.catalog);
+      if (catalog == null) {
+        throw new DatabaseNotFoundException(
+            "Catalog does not exist: " + tableName.catalog);
+      }
+    }
+    return catalog.getTable(tableName.db_name, tableName.table_name);
+  }
+
   private TDescribeResult doDescribeTable(TTableName tableName,
       TDescribeOutputStyle outputStyle, User user, String vTableName)
       throws ImpalaException {
-    FeTable table = getCatalog().getTable(tableName.db_name,
-        tableName.table_name);
+    // The name has a catalog for tables that were referenced with a catalog-qualified
+    // name, see DescribeTableStmt.toThrift().
+    FeTable table = getTable(tableName);
     List<Column> filteredColumns = filterAuthorizedColumnsForDescribeTable(table, user);
     if (outputStyle == TDescribeOutputStyle.MINIMAL) {
       if (table instanceof FeKuduTable) {
@@ -2380,25 +2416,39 @@ public class Frontend {
   }
 
   /**
+   * Returns true if 'catalog' is null (not qualified with a catalog) or the default
+   * catalog.
+   */
+  private static boolean isDefaultCatalog(String catalog) {
+    return catalog == null || catalog.equalsIgnoreCase(FeCatalog.DEFAULT_CATALOG);
+  }
+
+  /**
    * Collect required catalog objects for query planning of the statement and update
    * the request.
    */
   public static void collectRequiredObjects(TWaitForHmsEventRequest req,
-      StatementBase stmt, String sessionDb) {
+      StatementBase stmt, String sessionDbName) {
     if (stmt instanceof ShowDbsStmt) {
       req.want_db_list = true;
       return;
     }
+    QualifiedDbName sessionDb = new QualifiedDbName(null, sessionDbName);
     // The statement hasn't been analyzed yet. We can only get the parsed db, i.e. the db
     // name written in the query string.
     String dbName = stmt.getParsedDb();
+    String catalog = stmt.getParsedCatalog();
     // Use the session database if the db is not specified in SHOW TABLES/VIEWS/FUNCTIONS
     // statement.
     if (dbName == null &&
         (stmt instanceof ShowFunctionsStmt || stmt instanceof ShowTablesOrViewsStmt)) {
-      dbName = sessionDb;
+      dbName = sessionDbName;
+      catalog = null;
     }
     if (dbName != null) {
+      // Only the default catalog is synced with HMS events. Databases may be qualified
+      // with a catalog (SHOW TABLES IN catalog.db).
+      if (!isDefaultCatalog(catalog)) return;
       TCatalogObject dbDesc = new TCatalogObject();
       dbDesc.setType(TCatalogObjectType.DATABASE);
       dbDesc.setDb(new TDatabase(dbName));
@@ -2441,6 +2491,8 @@ public class Frontend {
     }
     Set<String> dbNames = new HashSet<>();
     for (TableName tblName : tableNames) {
+      // Only the default catalog is synced with HMS events.
+      if (!isDefaultCatalog(tblName.getCatalog())) continue;
       dbNames.add(tblName.getDb());
       TCatalogObject tblDesc = new TCatalogObject(TCatalogObjectType.TABLE, 0);
       tblDesc.setTable(new TTable(tblName.getDb(), tblName.getTbl()));

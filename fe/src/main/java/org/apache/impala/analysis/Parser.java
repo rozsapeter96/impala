@@ -74,7 +74,11 @@ public class Parser {
     SqlParser parser = new SqlParser(input);
     parser.setQueryOptions(options);
     try {
-      return parser.parse().value;
+      Object result = parser.parse().value;
+      if (result instanceof StatementBase) {
+        ((StatementBase) result).setParsedTableNames(parser.getParsedTableNames());
+      }
+      return result;
     } catch (AnalysisException e) {
       // Pass along any analysis exceptions as they are. Since AnalysisException
       // is a kind of Exception, we have to special-case it here

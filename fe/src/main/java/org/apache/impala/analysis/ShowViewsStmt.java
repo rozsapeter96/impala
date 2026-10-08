@@ -27,7 +27,9 @@ public class ShowViewsStmt extends ShowTablesOrViewsStmt {
 
   public ShowViewsStmt(String pattern) { super(null, pattern); }
 
-  public ShowViewsStmt(String database, String pattern) { super(database, pattern); }
+  public ShowViewsStmt(QualifiedDbName database, String pattern) {
+    super(database, pattern);
+  }
 
   @Override
   public String toSql(ToSqlOptions options) {
@@ -35,13 +37,14 @@ public class ShowViewsStmt extends ShowTablesOrViewsStmt {
       if (getParsedDb() == null) {
         return "SHOW VIEWS";
       } else {
-        return "SHOW VIEWS IN " + getParsedDb();
+        return "SHOW VIEWS IN " + getParsedQualifiedDb().toSql();
       }
     } else {
       if (getParsedDb() == null) {
         return "SHOW VIEWS LIKE '" + getPattern() + "'";
       } else {
-        return "SHOW VIEWS IN " + getParsedDb() + " LIKE '" + getPattern() + "'";
+        return "SHOW VIEWS IN " + getParsedQualifiedDb().toSql() +
+            " LIKE '" + getPattern() + "'";
       }
     }
   }

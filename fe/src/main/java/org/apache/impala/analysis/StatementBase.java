@@ -47,6 +47,9 @@ public abstract class StatementBase extends StmtNode {
   // True if the statement is noop.
   protected boolean isNoOp_ = false;
 
+  // See getParsedTableNames().
+  private List<TableName> parsedTableNames_ = Collections.emptyList();
+
   /////////////////////////////////////////
   // BEGIN: Members that need to be reset()
 
@@ -65,7 +68,28 @@ public abstract class StatementBase extends StmtNode {
     analyzer_ = other.analyzer_;
     isExplain_ = other.isExplain_;
     isNoOp_ = other.isNoOp_;
+    parsedTableNames_ = other.parsedTableNames_;
   }
+
+  /**
+   * Returns the table names of this statement and its nested statements that were
+   * parsed as a 'table_name' or as the table of a 'column_name', i.e. the names that do
+   * not go through path resolution (unlike table refs of queries). Only set for
+   * statements returned by the Parser.
+   */
+  public List<TableName> getParsedTableNames() { return parsedTableNames_; }
+
+  void setParsedTableNames(List<TableName> tableNames) {
+    parsedTableNames_ = Preconditions.checkNotNull(tableNames);
+  }
+
+  /**
+   * Returns true if the tables of getParsedTableNames() can be tables of any catalog.
+   * Most statements that take table names are executed by catalogd or look the table
+   * up again by database and table name, so they only support tables of the default
+   * catalog. See PathResolver.checkParsedTableNameCatalogs().
+   */
+  public boolean supportsNonDefaultCatalogs() { return false; }
 
   /**
    * Returns all table references in this statement and all its nested statements.
@@ -79,6 +103,12 @@ public abstract class StatementBase extends StmtNode {
    */
   @Nullable
   public String getParsedDb() { return null; }
+
+  /**
+   * Returns the catalog that the database of getParsedDb() is qualified with, or null if
+   * it is not qualified with a catalog ('SHOW TABLES IN catalog.db').
+   */
+  public String getParsedCatalog() { return null; }
 
   /**
    * Returns whether the analysis on the statement requires HMS metadata.

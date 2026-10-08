@@ -27,11 +27,11 @@ public abstract class ShowTablesOrViewsStmt extends StatementBase {
   // Pattern to match tables or views against. | denotes choice, * matches all strings
   private final String pattern_;
 
-  // DB (if any) as seen by the parser
-  private final String parsedDb_;
+  // DB (if any) as seen by the parser, optionally qualified with a catalog.
+  private final QualifiedDbName parsedDb_;
 
   // Set during analysis
-  private String postAnalysisDb_;
+  private QualifiedDbName postAnalysisDb_;
 
   /**
    * Default constructor, which creates a show statement with the default
@@ -58,30 +58,39 @@ public abstract class ShowTablesOrViewsStmt extends StatementBase {
    * ShowViewsStmt).
    *
    * If pattern is null, all tables in the supplied database match.
-   * If database is null, the default database is searched.
+   * If database is null, the session database is searched.
    */
-  public ShowTablesOrViewsStmt(String database, String pattern) {
+  public ShowTablesOrViewsStmt(QualifiedDbName database, String pattern) {
     this.parsedDb_ = database;
     this.pattern_ = pattern;
     this.postAnalysisDb_ = null;
   }
 
   @Override
-  public String getParsedDb() { return parsedDb_; }
+  public String getParsedDb() { return parsedDb_ == null ? null : parsedDb_.getDb(); }
+
+  @Override
+  public String getParsedCatalog() {
+    return parsedDb_ == null ? null : parsedDb_.getCatalog();
+  }
+
+  /** Returns the database as seen by the parser, or null if none was given. */
+  public QualifiedDbName getParsedQualifiedDb() { return parsedDb_; }
+
   public String getPattern() { return pattern_; }
 
   /**
-   * Can only be called after analysis, returns the name of the database that
-   * this show will search against.
+   * Can only be called after analysis, returns the database that this show will search
+   * against: the parsed database, or the session database (with its catalog).
    */
-  public String getDb() {
+  public QualifiedDbName getDb() {
     Preconditions.checkNotNull(postAnalysisDb_);
     return postAnalysisDb_;
   }
 
   @Override
   public void analyze(Analyzer analyzer) throws AnalysisException {
-    postAnalysisDb_ = (parsedDb_ == null ? analyzer.getDefaultDb() : parsedDb_);
+    postAnalysisDb_ = (parsedDb_ == null ? analyzer.getSessionDb() : parsedDb_);
     if (analyzer.getDb(postAnalysisDb_, Privilege.ANY) == null) {
       throw new AnalysisException(Analyzer.DB_DOES_NOT_EXIST_ERROR_MSG + postAnalysisDb_);
     }
@@ -90,7 +99,8 @@ public abstract class ShowTablesOrViewsStmt extends StatementBase {
   public TShowTablesParams toThrift() {
     TShowTablesParams params = new TShowTablesParams();
     params.setShow_pattern(getPattern());
-    params.setDb(getDb());
+    params.setDb(getDb().getDb());
+    if (getDb().getCatalog() != null) params.setCatalog(getDb().getCatalog());
     return params;
   }
 }

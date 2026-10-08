@@ -199,6 +199,21 @@ class TestIcebergRestCatalogWithHms(IcebergRestCatalogTests):
     self.run_test_case('QueryTest/iceberg-multiple-rest-catalogs',
                        vector, use_db="ice")
 
+  @RestServerProperties(
+    {'port': 9084},
+    {'port': 9085,
+     'catalog_location': '/test-warehouse/iceberg_test/secondary_hadoop_catalog'}
+  )
+  @CustomClusterTestSuite.with_args(
+     impalad_args=MULTIPLE_REST_IMPALAD_ARGS,
+     catalogd_args=MULTICATALOG_CATALOGD_ARGS)
+  @pytest.mark.execute_serially
+  def test_catalog_qualified_names(self, vector):
+    """Tables referenced with catalog-qualified names (catalog.db.tbl), with the HMS
+    ('default' catalog) and two REST catalogs."""
+    self.run_test_case('QueryTest/iceberg-catalog-qualified-names', vector,
+        use_db="functional")
+
   @RestServerProperties({'port': 9084})
   @CustomClusterTestSuite.with_args(
      impalad_args="{} --blacklisted_dbs=ice".format(MULTICATALOG_IMPALAD_ARGS),
@@ -322,6 +337,39 @@ class TestIcebergRestCatalogDmlStandalone(IcebergRestCatalogTests):
     assert result.data == ['2']
     assert self._snapshot_count(WRITE_TEST_TABLE) == 1
     assert self._snapshot_count(SECONDARY_WRITE_TEST_TABLE) == 1
+
+  @RestServerProperties(
+      {'port': 9084, 'catalog_location': WRITE_TEST_CATALOG_LOCATION,
+       'test_table': WRITE_TEST_TABLE},
+      {'port': 9085,
+       'catalog_location': SECONDARY_WRITE_TEST_CATALOG_LOCATION,
+       'test_table': WRITE_TEST_TABLE})
+  @CustomClusterTestSuite.with_args(
+     impalad_args=MULTIPLE_REST_WITHOUT_CATALOGD_IMPALAD_ARGS,
+     start_args=NO_CATALOGD_STARTARGS,
+     cluster_size=1)
+  @pytest.mark.execute_serially
+  def test_catalog_qualified_insert(self):
+    """Both REST catalogs have a table with the same name, which is ambiguous without a
+    catalog. Catalog-qualified names pick the catalog."""
+    result = self.execute_query_expect_failure(
+        self.client, "select i from {}".format(WRITE_TEST_TABLE))
+    assert "Ambiguous table name" in str(result)
+
+    rest1_table = "`rest-1`.{}".format(WRITE_TEST_TABLE)
+    rest2_table = "`rest-2`.{}".format(WRITE_TEST_TABLE)
+    self.execute_query_expect_success(
+        self.client, "insert into {} values (1)".format(rest1_table))
+    self.execute_query_expect_success(
+        self.client, "insert into {} values (2)".format(rest2_table))
+    result = self.execute_query_expect_success(
+        self.client, "select i from {}".format(rest1_table))
+    assert result.data == ['1']
+    result = self.execute_query_expect_success(
+        self.client, "select i from {}".format(rest2_table))
+    assert result.data == ['2']
+    assert self._snapshot_count(rest1_table) == 1
+    assert self._snapshot_count(rest2_table) == 1
 
   def _snapshot_count(self, table_name):
     result = self.execute_query_expect_success(

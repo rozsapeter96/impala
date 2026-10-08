@@ -157,9 +157,7 @@ public class OptimizeStmt extends DmlStatementBase {
     super.analyze(analyzer);
 
     Preconditions.checkState(table_ == null);
-    if (!tableName_.isFullyQualified()) {
-      tableName_ = new TableName(analyzer.getDefaultDb(), tableName_.getTbl());
-    }
+    tableName_ = analyzer.getFqTableName(tableName_);
     tableRef_ = TableRef.newTableRef(analyzer, tableName_.toPath(), null);
     // For OPTIMIZE, ALL privileges are required.
     table_ = analyzer.getTable(tableName_, Privilege.ALL);

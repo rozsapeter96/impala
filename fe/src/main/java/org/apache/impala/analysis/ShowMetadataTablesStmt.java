@@ -47,10 +47,10 @@ import com.google.common.base.Preconditions;
 public class ShowMetadataTablesStmt extends ShowTablesOrViewsStmt {
   private final String tbl_;
 
-  public ShowMetadataTablesStmt(String database, String tbl, String pattern) {
-    super(database, pattern);
-    Preconditions.checkNotNull(tbl);
-    tbl_ = tbl;
+  public ShowMetadataTablesStmt(TableName tableName, String pattern) {
+    super(tableName.getDb() == null ? null :
+        new QualifiedDbName(tableName.getCatalog(), tableName.getDb()), pattern);
+    tbl_ = tableName.getTbl();
   }
 
   @Override
@@ -64,7 +64,7 @@ public class ShowMetadataTablesStmt extends ShowTablesOrViewsStmt {
     Preconditions.checkNotNull(tbl_);
     super.analyze(analyzer);
 
-    String db = getDb();
+    String db = getDb().getDb();
     analyzer.registerPrivReq(builder ->
         builder.onTableUnknownOwner(db, tbl_)
         .any()
@@ -97,8 +97,8 @@ public class ShowMetadataTablesStmt extends ShowTablesOrViewsStmt {
   public String toSql(ToSqlOptions options) {
     StringBuilder sb = new StringBuilder("SHOW METADATA TABLES IN ");
 
-    String parsedDb = getParsedDb();
-    if (parsedDb != null) sb.append(parsedDb).append(".");
+    QualifiedDbName parsedDb = getParsedQualifiedDb();
+    if (parsedDb != null) sb.append(parsedDb.toSql()).append(".");
 
     sb.append(tbl_);
 
@@ -110,8 +110,11 @@ public class ShowMetadataTablesStmt extends ShowTablesOrViewsStmt {
 
   private List<String> createRawPath() {
     List<String> res = new ArrayList<>();
-    final String dbName = isAnalyzed() ? getDb() : getParsedDb();
-    if (dbName != null) res.add(dbName);
+    final QualifiedDbName dbName = isAnalyzed() ? getDb() : getParsedQualifiedDb();
+    if (dbName != null) {
+      if (dbName.getCatalog() != null) res.add(dbName.getCatalog());
+      res.add(dbName.getDb());
+    }
     res.add(tbl_);
     return res;
   }

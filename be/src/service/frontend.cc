@@ -269,12 +269,13 @@ Status Frontend::GetTableNames(const string& db, const string* pattern,
 
 Status Frontend::GetTableNames(const string& db, const string* pattern,
     const TSessionState* session, const set<TImpalaTableType::type>& table_types,
-    TGetTablesResult* table_names) {
+    TGetTablesResult* table_names, const string* catalog) {
   TGetTablesParams params;
   params.__set_db(db);
   params.__set_table_types(table_types);
   if (pattern != nullptr) params.__set_pattern(*pattern);
   if (session != nullptr) params.__set_session(*session);
+  if (catalog != nullptr) params.__set_catalog(*catalog);
   return JniUtil::CallJniMethod(fe_, get_table_names_id_, params, table_names);
 }
 

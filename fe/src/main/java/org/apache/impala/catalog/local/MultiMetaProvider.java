@@ -87,6 +87,12 @@ public class MultiMetaProvider implements MetaProvider {
     for (MetaProvider provider : providers) {
       String name = provider.getCatalogName();
       if (name == null) continue;
+      if (name.contains(".")) {
+        // Such names can not be told apart from qualified database names.
+        LOG.warn("Catalog name {} contains a dot, it can not qualify table names",
+            name);
+        continue;
+      }
       if (result.putIfAbsent(name.toLowerCase(), provider) != null) {
         LOG.warn("Catalog name {} is used by more than one metadata provider, " +
             "using {}", name, result.get(name.toLowerCase()).getURI());

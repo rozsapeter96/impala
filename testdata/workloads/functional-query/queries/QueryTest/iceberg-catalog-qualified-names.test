@@ -1,0 +1,79 @@
+====
+---- QUERY
+# Tables of REST catalogs, qualified with the catalog name. Catalog 'rest-1' has the
+# namespace 'ice', catalog 'rest-2' has the namespace 'berg'.
+SELECT lat FROM `rest-2`.berg.airports_parquet WHERE iata = '00R';
+---- RESULTS
+30.68586111
+---- TYPES
+DOUBLE
+====
+---- QUERY
+SELECT ice_air.iata, ice_air.lat, berg_air.lon
+FROM `rest-1`.ice.airports_parquet ice_air
+INNER JOIN `rest-2`.berg.airports_parquet berg_air
+ON berg_air.iata = ice_air.iata AND berg_air.iata = "00M";
+---- RESULTS
+'00M',31.95376472,-89.2345047
+---- TYPES
+STRING, DOUBLE, DOUBLE
+====
+---- QUERY
+# Tables of the HMS are in the catalog 'default'.
+SELECT count(*) FROM `default`.functional.alltypestiny t
+JOIN `rest-1`.ice.airports_parquet a ON a.iata = '00M' AND t.id = 0;
+---- RESULTS
+1
+---- TYPES
+BIGINT
+====
+---- QUERY
+# A namespace of one REST catalog is not visible through the other catalog.
+SELECT * FROM `rest-1`.berg.airports_parquet;
+---- CATCH
+Could not resolve table reference: 'rest-1.berg.airports_parquet'
+====
+---- QUERY
+SELECT * FROM `rest-3`.berg.airports_parquet;
+---- CATCH
+Could not resolve table reference: 'rest-3.berg.airports_parquet'
+====
+---- QUERY
+SELECT * FROM `rest-2`.berg.airports_parquet.history;
+---- RESULTS: VERIFY_IS_SUBSET
+row_regex:.*
+---- TYPES
+TIMESTAMP, BIGINT, BIGINT, BOOLEAN
+====
+---- QUERY
+DESCRIBE `rest-2`.berg.airports_parquet;
+---- RESULTS
+'iata','string','','true'
+'airport','string','','true'
+'city','string','','true'
+'state','double','','true'
+'country','string','','true'
+'lat','double','','true'
+'lon','double','','true'
+---- TYPES
+STRING, STRING, STRING, STRING
+====
+---- QUERY
+SHOW TABLES IN `rest-2`.berg;
+---- RESULTS: VERIFY_IS_SUBSET
+'airports_parquet'
+---- TYPES
+STRING
+====
+---- QUERY
+SHOW TABLES IN `rest-1`.berg;
+---- CATCH
+Database does not exist: rest-1.berg
+====
+---- QUERY
+# Statements other than queries, DESCRIBE, SHOW TABLES and INSERT only support the
+# default catalog.
+COMPUTE STATS `rest-2`.berg.airports_parquet;
+---- CATCH
+Table rest-2.berg.airports_parquet is in catalog 'rest-2'. This statement only supports tables of the 'default' catalog.
+====

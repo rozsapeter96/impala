@@ -4885,7 +4885,7 @@ public class AnalyzeStmtsTest extends AnalyzerTest {
     // Also check TableRefs.
     testNumberOfMembers(TableRef.class, 33);
     testNumberOfMembers(BaseTableRef.class, 0);
-    testNumberOfMembers(InlineViewRef.class, 10);
+    testNumberOfMembers(InlineViewRef.class, 11);
   }
   @SuppressWarnings("rawtypes")
   private void testNumberOfMembers(Class cl, int expectedNumMembers) {

@@ -570,6 +570,7 @@ public class AnalysisContext {
     @Override
     public AnalysisResult analyze() {
       try {
+        PathResolver.checkParsedTableNameCatalogs(stmt_, analyzer_);
         stmt_.analyze(analyzer_);
         // Enforce the statement expression limit at the end of analysis so that there is
         // an accurate count of the total number of expressions. The first analyze() call

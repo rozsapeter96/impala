@@ -25,6 +25,7 @@ import java.util.Set;
 import org.apache.commons.lang3.EnumUtils;
 import org.apache.iceberg.MetadataTableType;
 import org.apache.impala.analysis.Path.PathType;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.catalog.FeIcebergTable;
 import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.FeView;
@@ -86,18 +87,23 @@ public class PathResolver {
    * Notes on Iceberg tables:
    * a.b.c -> translates to metadata table querying
    */
-  public static List<TableName> getCandidateTables(List<String> path, String sessionDb) {
+  public static List<TableName> getCandidateTables(List<String> path,
+      QualifiedDbName sessionDb) {
     Preconditions.checkArgument(path != null && !path.isEmpty());
+    Preconditions.checkNotNull(sessionDb);
+    // In the definition of a view, 'sessionDb' has the catalog of the view and the
+    // candidates are in that catalog.
+    String catalog = sessionDb.getCatalog();
     List<TableName> result = new ArrayList<>();
     int end = Math.min(2, path.size());
     for (int tblNameIdx = 0; tblNameIdx < end; ++tblNameIdx) {
-      String dbName = (tblNameIdx == 0) ? sessionDb : path.get(0);
+      String dbName = (tblNameIdx == 0) ? sessionDb.getDb() : path.get(0);
       String tblName = path.get(tblNameIdx);
       String vTblName = null;
       if (canBeIcebergMetadataTable(path)) {
         vTblName = path.get(2);
       }
-      result.add(new TableName(dbName, tblName, vTblName));
+      result.add(new TableName(catalog, dbName, tblName, vTblName));
     }
     return result;
   }
@@ -159,9 +165,21 @@ public class PathResolver {
    * single table by name (e.g. DDL statements). If 'tableName' is already fully
    * qualified, returns 'tableName'.
    */
+  public static TableName getFqTableName(TableName tableName, QualifiedDbName sessionDb) {
+    if (tableName.getCatalog() != null) return tableName;
+    // In the definition of a view, 'sessionDb' has the catalog of the view.
+    String catalog = sessionDb.getCatalog();
+    if (tableName.isFullyQualified()) {
+      if (catalog == null) return tableName;
+      return new TableName(catalog, tableName.getDb(), tableName.getTbl(),
+          tableName.getVTbl());
+    }
+    return new TableName(catalog, sessionDb.getDb(), tableName.getTbl(), null);
+  }
+
+  /** getFqTableName() for a session database 'sessionDb' without a catalog. */
   public static TableName getFqTableName(TableName tableName, String sessionDb) {
-    if (tableName.isFullyQualified()) return tableName;
-    return new TableName(sessionDb, tableName.getTbl());
+    return getFqTableName(tableName, new QualifiedDbName(null, sessionDb));
   }
 
   /**
@@ -315,6 +333,33 @@ public class PathResolver {
     return result;
   }
 
+  /**
+   * Checks that the table names of 'stmt' that were not resolved as paths
+   * (StatementBase.getParsedTableNames()) are in the default catalog, unless the
+   * statement supports other catalogs. A name is in the catalog it is qualified with, or
+   * Must be
+   * called before the statement is analyzed, because statements that do not support
+   * other catalogs may look up their tables in the default catalog by database and
+   * table name.
+   */
+  public static void checkParsedTableNameCatalogs(StatementBase stmt, Analyzer analyzer)
+      throws AnalysisException {
+    if (stmt.supportsNonDefaultCatalogs()) return;
+    for (TableName tableName : stmt.getParsedTableNames()) {
+      String catalog = tableName.getCatalog();
+      if (catalog == null || catalog.equalsIgnoreCase(FeCatalog.DEFAULT_CATALOG)) {
+        continue;
+      }
+      if (!analyzer.getCatalog().getCatalogNames().contains(catalog.toLowerCase())) {
+        throw new AnalysisException("Catalog does not exist: " + catalog);
+      }
+      throw new AnalysisException(String.format("Table %s is in catalog '%s'. This " +
+          "statement only supports tables of the '%s' catalog. Tables of other " +
+          "catalogs are supported in queries, DESCRIBE, SHOW TABLES and INSERT INTO.",
+          tableName, catalog, FeCatalog.DEFAULT_CATALOG));
+    }
+  }
+
   private Set<String> getCatalogNames() {
     return analyzer_.getStmtTableCache().catalog.getCatalogNames();
   }
@@ -411,7 +456,7 @@ public class PathResolver {
     List<Path> candidates = new ArrayList<>();
     // Add paths rooted at a table with an unqualified and fully-qualified table name.
     List<TableName> candidateTbls = getCandidateTables(rawPath,
-        analyzer_.getDefaultDb());
+        analyzer_.getSessionDb());
     if (LOG.isTraceEnabled()) {
       LOG.trace("Candidate tables to lookup in catalog/cache for {} {}: {}", pathType,
           ToSqlUtils.getPathSql(rawPath), candidateTbls);
@@ -421,7 +466,8 @@ public class PathResolver {
       FeTable tbl = lookupTable(tblName, timeTravelSpec);
       if (tbl != null) {
         int offset = tblNameIdx + (tbl instanceof IcebergMetadataTable ? 2 : 1);
-        candidates.add(new Path(tbl, rawPath.subList(offset, rawPath.size())));
+        candidates.add(new Path(tbl, tblName.getCatalog(),
+            rawPath.subList(offset, rawPath.size())));
       }
     }
     return candidates;

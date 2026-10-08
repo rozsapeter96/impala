@@ -26,6 +26,7 @@ import org.apache.impala.catalog.BuiltinsDb;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.Db;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.catalog.HdfsCachePool;
 import org.apache.impala.catalog.ImpaladCatalog;
 import org.apache.impala.catalog.PrincipalPrivilege;
@@ -51,6 +52,10 @@ public class ImpaladTestCatalog extends ImpaladCatalog {
   // Used to load missing table metadata when running the FE tests.
   private final CatalogServiceCatalog srcCatalog_;
 
+  // Additional catalog names that tests can qualify table names with. They all refer to
+  // this catalog, see addTestCatalogName().
+  private final Set<String> testCatalogNames_ = new HashSet<>();
+
   public ImpaladTestCatalog() {
     this(new NoopAuthorizationFactory());
   }
@@ -66,6 +71,32 @@ public class ImpaladTestCatalog extends ImpaladCatalog {
     srcCatalog_ = catalogServerCatalog;
     srcCatalog_.addDb(BuiltinsDb.getInstance());
     setIsReady(true);
+  }
+
+  /**
+   * Adds a catalog name that table names can be qualified with in addition to the
+   * default catalog. The catalog has the same dbs and tables as this catalog, so tests
+   * can use catalogs other than the default catalog without a REST catalog.
+   */
+  public void addTestCatalogName(String name) {
+    testCatalogNames_.add(name.toLowerCase());
+  }
+
+  public void clearTestCatalogNames() { testCatalogNames_.clear(); }
+
+  @Override
+  public Set<String> getCatalogNames() {
+    Set<String> result = new HashSet<>(super.getCatalogNames());
+    result.addAll(testCatalogNames_);
+    return result;
+  }
+
+  @Override
+  public FeCatalog getCatalog(String catalogName) {
+    if (catalogName != null && testCatalogNames_.contains(catalogName.toLowerCase())) {
+      return this;
+    }
+    return super.getCatalog(catalogName);
   }
 
   /**

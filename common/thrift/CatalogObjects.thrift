@@ -216,6 +216,12 @@ struct TTableName {
 
   // Name of the table
   2: required string table_name
+
+  // The catalog of the table if it was referenced with a catalog-qualified name
+  // ('catalog.db.tbl'). Only set for names that the frontend sends to the backend and
+  // gets back to look the table up again in its catalog (DESCRIBE, Iceberg metadata
+  // tables), see Frontend.getTable(TTableName).
+  3: optional string catalog
 }
 
 struct TTableStats {

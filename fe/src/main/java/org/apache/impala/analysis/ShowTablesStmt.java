@@ -36,15 +36,17 @@ public class ShowTablesStmt extends ShowTablesOrViewsStmt {
 
   public ShowTablesStmt(String pattern) { super(null, pattern); }
 
-  public ShowTablesStmt(String database, String pattern) { super(database, pattern); }
+  public ShowTablesStmt(QualifiedDbName database, String pattern) {
+    super(database, pattern);
+  }
 
   @Override
   public String toSql(ToSqlOptions options) {
     StringBuilder sb = new StringBuilder("SHOW TABLES");
 
-    String parsedDb = getParsedDb();
+    QualifiedDbName parsedDb = getParsedQualifiedDb();
     if (parsedDb != null) {
-      sb.append(" IN ").append(parsedDb);
+      sb.append(" IN ").append(parsedDb.toSql());
     }
 
     String pattern = getPattern();

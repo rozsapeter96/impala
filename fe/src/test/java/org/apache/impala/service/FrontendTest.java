@@ -516,6 +516,14 @@ public class FrontendTest extends FrontendTestBase {
     TestCollectRequiredObjectsHelper("SELECT * FROM other_catalog.mydb.tbl",
         db, Arrays.asList(db, "other_catalog"),
         Arrays.asList(db + ".other_catalog", "other_catalog.mydb"));
+    TestCollectRequiredObjectsHelper("DROP TABLE default.mydb.foo",
+        db, Arrays.asList("mydb"), Arrays.asList("mydb.foo"));
+    TestCollectRequiredObjectsHelper("DROP TABLE other_catalog.mydb.foo",
+        db, Collections.emptyList(), Collections.emptyList());
+    TestCollectRequiredObjectsHelper("SHOW TABLES IN default.mydb",
+        db, Arrays.asList("mydb"), Collections.emptyList());
+    TestCollectRequiredObjectsHelper("SHOW TABLES IN other_catalog.mydb",
+        db, Collections.emptyList(), Collections.emptyList());
     TestCollectRequiredObjectsHelper("DESCRIBE HISTORY foo",
         db, Arrays.asList(db), Arrays.asList(db + ".foo"));
     TestCollectRequiredObjectsHelper("DESCRIBE HISTORY mydb.tbl",
