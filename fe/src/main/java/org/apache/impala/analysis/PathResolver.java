@@ -20,6 +20,7 @@ package org.apache.impala.analysis;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.commons.lang3.EnumUtils;
 import org.apache.iceberg.MetadataTableType;
@@ -54,6 +55,11 @@ import com.google.common.collect.Lists;
  *   3. Table refs only: catalog tables. The candidates of getCandidateTables() are
  *      resolved together. See getCatalogTableCandidates().
  *   4. Enclosing query blocks, if correlated references are allowed.
+ *   5. Catalog-qualified names ('catalog.db.tbl...', see FeCatalog.getCatalogNames()):
+ *      tiers 2 to 4 again, with the aliases of table refs that were referenced with a
+ *      catalog-qualified name and with the catalog-qualified table. Only tried if no
+ *      other interpretation of the path is legal, so names that resolve without a
+ *      catalog keep their meaning. See resolveCatalogQualified().
  * A tier is only consulted if the previous tiers have no legal resolution. Within a
  * tier, more than one legal resolution is an ambiguity error.
  */
@@ -108,22 +114,40 @@ public class PathResolver {
   public static boolean canBeIcebergMetadataTable(List<String> path) {
     if (path == null) return false;
     if (path.size() < 3) return false;
-    String vTableName = path.get(2).toUpperCase();
-    return EnumUtils.isValidEnum(MetadataTableType.class, vTableName);
+    return isMetadataTableType(path.get(2));
+  }
+
+  private static boolean isMetadataTableType(String name) {
+    return EnumUtils.isValidEnum(MetadataTableType.class, name.toUpperCase());
   }
 
   /**
-   * Returns true if 'path' refers to an Iceberg metadata table whose base table has been
+   * Returns the catalog-qualified table name that 'path' might refer to
+   * ('catalog.db.tbl', or 'catalog.db.tbl.<metadata table type>'), or null if the first
+   * element of 'path' is not one of 'catalogNames'. Unlike getCandidateTables(), the
+   * returned table is only considered if none of those resolve.
+   */
+  public static TableName getCatalogQualifiedTable(List<String> path,
+      Set<String> catalogNames) {
+    Preconditions.checkArgument(path != null && !path.isEmpty());
+    if (path.size() < 3 || !catalogNames.contains(path.get(0).toLowerCase())) {
+      return null;
+    }
+    String vTblName = null;
+    if (path.size() > 3 && isMetadataTableType(path.get(3))) vTblName = path.get(3);
+    return new TableName(path.get(0), path.get(1), path.get(2), vTblName);
+  }
+
+  /**
+   * Returns true if 'tblName' names an Iceberg metadata table whose base table has been
    * loaded for the statement.
    */
-  public boolean isIcebergMetadataTable(List<String> path) {
-    if (!canBeIcebergMetadataTable(path)) return false;
-
-    TableName virtualTableName = new TableName(path.get(0), path.get(1), path.get(2));
+  public boolean isIcebergMetadataTable(TableName tblName) {
+    if (tblName.getVTbl() == null || tblName.getDb() == null) return false;
+    if (!isMetadataTableType(tblName.getVTbl())) return false;
     // The catalog table (the base of the virtual table) has been loaded and cached
     // under the name of the virtual table.
-    FeTable catalogTable =
-        analyzer_.getStmtTableCache().tables.get(virtualTableName);
+    FeTable catalogTable = analyzer_.getStmtTableCache().tables.get(tblName);
     // If the metadata table has already been analyzed in the query, the table cache will
     // return the virtual table, not the base table.
     return catalogTable instanceof FeIcebergTable ||
@@ -191,25 +215,61 @@ public class PathResolver {
     // Convert all path elements to lower case.
     List<String> lcRawPath = Lists.newArrayListWithCapacity(rawPath.size());
     for (String s: rawPath) lcRawPath.add(s.toLowerCase());
-    return resolve(lcRawPath, pathType, resolveInAncestors, timeTravelSpec);
+    Errors errors = new Errors();
+    Path result = resolve(lcRawPath, pathType, resolveInAncestors, timeTravelSpec,
+        /*catalogQualified=*/false, errors);
+    if (result == null) {
+      result = resolveCatalogQualified(lcRawPath, pathType, resolveInAncestors,
+          timeTravelSpec, errors);
+    }
+    if (result == null) {
+      Preconditions.checkState(!errors.messages.isEmpty());
+      throw new AnalysisException(errors.messages.getFirst());
+    }
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Resolved {} {} to {}", pathType, ToSqlUtils.getPathSql(lcRawPath),
+          result.debugString());
+    }
+    return result;
   }
 
+  /**
+   * Error messages of a failed resolution and whether any interpretation of the path
+   * was legal.
+   */
+  private static class Errors {
+    // Prioritized error messages, the most relevant first.
+    LinkedList<String> messages = Lists.newLinkedList();
+    // True if at least one candidate path was legal, i.e. the path was ambiguous.
+    boolean hasLegalPath = false;
+    // True if at least one candidate path could be resolved, even if it was illegal.
+    boolean hasResolvedPath = false;
+  }
+
+  /**
+   * Resolves 'rawPath' with tiers 2 to 4, or with catalog-qualified names only if
+   * 'catalogQualified' is true. Returns null and populates 'errors' if there is no
+   * single legal resolution.
+   */
   private Path resolve(List<String> rawPath, PathType pathType,
-      boolean resolveInAncestors, TimeTravelSpec timeTravelSpec)
+      boolean resolveInAncestors, TimeTravelSpec timeTravelSpec,
+      boolean catalogQualified, Errors errors)
       throws AnalysisException, TableLoadingException {
     // List of all candidate paths with different roots. Paths in this list are initially
     // unresolved and may be illegal with respect to the pathType.
-    List<Path> candidates = getAliasCandidates(rawPath);
+    List<Path> candidates = catalogQualified ?
+        getCatalogQualifiedAliasCandidates(rawPath) : getAliasCandidates(rawPath);
     if (LOG.isTraceEnabled()) {
       LOG.trace("Candidates for {} {}: {}", pathType, ToSqlUtils.getPathSql(rawPath),
           candidates);
     }
-    LinkedList<String> errors = Lists.newLinkedList();
     if (pathType == PathType.SLOT_REF || pathType == PathType.STAR) {
       // Paths rooted at all of the unique registered tuple descriptors.
-      for (TableRef tblRef: analyzer_.getTableRefs().values()) {
-        if (tblRef.isHidden()) continue;
-        candidates.add(new Path(tblRef.getDesc(), rawPath));
+      if (!catalogQualified) {
+        for (TableRef tblRef: analyzer_.getTableRefs().values()) {
+          if (tblRef.isHidden()) continue;
+          candidates.add(new Path(tblRef.getDesc(), rawPath));
+        }
       }
     } else {
       // Always prefer table ref paths rooted at a registered tuples descriptor.
@@ -217,25 +277,46 @@ public class PathResolver {
           pathType == PathType.ANY);
       Path result = resolveCandidates(rawPath, candidates, pathType, errors);
       if (result != null) return result;
-      candidates = getCatalogTableCandidates(rawPath, pathType, timeTravelSpec);
+      candidates = catalogQualified ?
+          getCatalogQualifiedTableCandidates(rawPath, timeTravelSpec) :
+          getCatalogTableCandidates(rawPath, pathType, timeTravelSpec);
       LOG.trace("Replace candidates with {}", candidates);
     }
 
     Path result = resolveCandidates(rawPath, candidates, pathType, errors);
     if (result == null && resolveInAncestors && analyzer_.hasAncestors()) {
       LOG.trace("Resolve in ancestors");
+      // The errors of the outermost query block are reported.
+      errors.messages.clear();
       result = analyzer_.getParentAnalyzer().getPathResolver().resolve(
-          rawPath, pathType, true, timeTravelSpec);
-    }
-    if (result == null) {
-      Preconditions.checkState(!errors.isEmpty());
-      throw new AnalysisException(errors.getFirst());
-    }
-    if (LOG.isTraceEnabled()) {
-      LOG.trace("Resolved {} {} to {}", pathType, ToSqlUtils.getPathSql(rawPath),
-          result.debugString());
+          rawPath, pathType, true, timeTravelSpec, catalogQualified, errors);
     }
     return result;
+  }
+
+  /**
+   * Tier 5: resolves 'rawPath' as a catalog-qualified path if its first element is a
+   * catalog name and no other interpretation of it was legal ('errors' are the errors
+   * of the other interpretations). Returns null if it does not resolve. The errors of
+   * this tier replace 'errors' if a catalog-qualified candidate could be resolved.
+   */
+  private Path resolveCatalogQualified(List<String> rawPath, PathType pathType,
+      boolean resolveInAncestors, TimeTravelSpec timeTravelSpec, Errors errors)
+      throws AnalysisException, TableLoadingException {
+    if (errors.hasLegalPath) return null;
+    if (rawPath.size() < 3) return null;
+    if (!getCatalogNames().contains(rawPath.get(0))) return null;
+    Errors catalogErrors = new Errors();
+    Path result = resolve(rawPath, pathType, resolveInAncestors, timeTravelSpec,
+        /*catalogQualified=*/true, catalogErrors);
+    if (result == null && catalogErrors.hasResolvedPath) {
+      errors.messages = catalogErrors.messages;
+    }
+    return result;
+  }
+
+  private Set<String> getCatalogNames() {
+    return analyzer_.getStmtTableCache().catalog.getCatalogNames();
   }
 
   /**
@@ -263,6 +344,65 @@ public class PathResolver {
   }
 
   /**
+   * Returns a list of unresolved Paths that are rooted at a registered tuple descriptor
+   * with the implicit alias 'catalog.db.tbl' of a table ref that was referenced with a
+   * catalog-qualified name, if the first three elements of 'rawPath' match it.
+   */
+  private List<Path> getCatalogQualifiedAliasCandidates(List<String> rawPath)
+      throws AnalysisException {
+    List<Path> result = new ArrayList<>();
+    TupleDescriptor rootDesc = analyzer_.getDescriptor(
+        Joiner.on(".").join(rawPath.subList(0, 3)));
+    if (rootDesc != null && !rootDesc.isHidden()) {
+      result.add(new Path(rootDesc, rawPath.subList(3, rawPath.size())));
+    }
+    return result;
+  }
+
+  /**
+   * Returns a list with an unresolved Path rooted at the catalog-qualified table of
+   * 'rawPath' if it exists, an empty list otherwise.
+   */
+  private List<Path> getCatalogQualifiedTableCandidates(List<String> rawPath,
+      TimeTravelSpec timeTravelSpec) throws AnalysisException, TableLoadingException {
+    List<Path> candidates = new ArrayList<>();
+    TableName tblName = getCatalogQualifiedTable(rawPath, getCatalogNames());
+    if (tblName == null) return candidates;
+    FeTable tbl = lookupTable(tblName, timeTravelSpec);
+    if (tbl == null) return candidates;
+    int offset = tbl instanceof IcebergMetadataTable ? 4 : 3;
+    candidates.add(new Path(tbl, tblName.getCatalog(),
+        rawPath.subList(offset, rawPath.size())));
+    return candidates;
+  }
+
+  /**
+   * Returns the table 'tblName' loaded for the statement, or null if it does not exist.
+   * Wraps Iceberg tables in an IcebergTimeTravelTable if 'timeTravelSpec' is non-null.
+   */
+  private FeTable lookupTable(TableName tblName, TimeTravelSpec timeTravelSpec)
+      throws AnalysisException, TableLoadingException {
+    FeTable tbl = null;
+    try {
+      tbl = analyzer_.getTable(tblName, /* must_exist */ false);
+    } catch (AnalysisException e) {
+      // Ignore to allow path resolution to continue.
+    }
+    if (tbl == null || timeTravelSpec == null) return tbl;
+    if (!(tbl instanceof FeIcebergTable)) {
+      throw new AnalysisException(String.format(
+          "FOR %s AS OF clause is only supported for Iceberg tables. "
+              + "%s is not an Iceberg table.",
+          timeTravelSpec.getKind() == TimeTravelSpec.Kind.TIME_AS_OF ?
+              "SYSTEM_TIME" :
+              "SYSTEM_VERSION",
+          tbl.getFullName()));
+    }
+    timeTravelSpec.analyze(analyzer_);
+    return new IcebergTimeTravelTable((FeIcebergTable) tbl, timeTravelSpec);
+  }
+
+  /**
    * Returns a list of unresolved Paths that are rooted at the catalog tables of
    * getCandidateTables() that exist.
    */
@@ -278,28 +418,8 @@ public class PathResolver {
     }
     for (int tblNameIdx = 0; tblNameIdx < candidateTbls.size(); ++tblNameIdx) {
       TableName tblName = candidateTbls.get(tblNameIdx);
-      FeTable tbl = null;
-      try {
-        tbl = analyzer_.getTable(tblName, /* must_exist */ false);
-      } catch (AnalysisException e) {
-        // Ignore to allow path resolution to continue.
-      }
+      FeTable tbl = lookupTable(tblName, timeTravelSpec);
       if (tbl != null) {
-        if (timeTravelSpec != null) {
-          if (!(tbl instanceof FeIcebergTable)) {
-            throw new AnalysisException(String.format(
-                "FOR %s AS OF clause is only supported for Iceberg tables. "
-                    + "%s is not an Iceberg table.",
-                timeTravelSpec.getKind() == TimeTravelSpec.Kind.TIME_AS_OF ?
-                    "SYSTEM_TIME" :
-                    "SYSTEM_VERSION",
-                tbl.getFullName()));
-          }
-          timeTravelSpec.analyze(analyzer_);
-
-          FeIcebergTable rootTable = (FeIcebergTable) tbl;
-          tbl = new IcebergTimeTravelTable(rootTable, timeTravelSpec);
-        }
         int offset = tblNameIdx + (tbl instanceof IcebergMetadataTable ? 2 : 1);
         candidates.add(new Path(tbl, rawPath.subList(offset, rawPath.size())));
       }
@@ -314,7 +434,8 @@ public class PathResolver {
    * most relevant one. The list contains at least one error message if null is returned.
    */
   private Path resolveCandidates(List<String> rawPath, List<Path> paths,
-      PathType pathType, LinkedList<String> errors) {
+      PathType pathType, Errors resolutionErrors) {
+    LinkedList<String> errors = resolutionErrors.messages;
     // For generating error messages.
     String pathTypeStr = null;
     String pathStr = Joiner.on(".").join(rawPath);
@@ -336,6 +457,7 @@ public class PathResolver {
         LOG.trace("Can't resolve path {}", p);
         continue;
       }
+      resolutionErrors.hasResolvedPath = true;
 
       // Check legality of the resolved path.
       if (p.isRootedAtTuple() && !analyzer_.isVisible(p.getRootDesc().getId())) {
@@ -401,6 +523,7 @@ public class PathResolver {
       legalPaths.add(p);
     }
 
+    if (!legalPaths.isEmpty()) resolutionErrors.hasLegalPath = true;
     if (legalPaths.size() > 1) {
       errors.addFirst(String.format("%s is ambiguous: '%s'",
           pathTypeStr, pathStr));

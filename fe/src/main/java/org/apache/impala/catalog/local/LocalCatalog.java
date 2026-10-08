@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.authorization.AuthorizationPolicy;
@@ -85,12 +86,39 @@ public class LocalCatalog implements FeCatalog {
   private String nullPartitionKeyValue_;
   // Catalog service id when MetaProvider is CatalogdMetaProvider
   private TUniqueId catalogServiceId_ = Catalog.INITIAL_CATALOG_SERVICE_ID;
+  // Providers of the catalogs that table names can be qualified with, by lower-case
+  // catalog name.
+  private final Map<String, MetaProvider> catalogProviders_;
+  // The catalogs of 'catalogProviders_' that have been accessed. May be accessed from
+  // multiple table loading threads.
+  private final Map<String, LocalCatalog> catalogs_ = new ConcurrentHashMap<>();
 
   public LocalCatalog(MetaProvider metaProvider) {
     metaProvider_ = Preconditions.checkNotNull(metaProvider);
     if (metaProvider instanceof CatalogdMetaProvider) {
       catalogServiceId_ = ((CatalogdMetaProvider) metaProvider).getCatalogServiceId();
     }
+    if (metaProvider instanceof MultiMetaProvider) {
+      catalogProviders_ = ((MultiMetaProvider) metaProvider).getCatalogProviders();
+    } else if (metaProvider.getCatalogName() != null) {
+      catalogProviders_ = Collections.singletonMap(
+          metaProvider.getCatalogName().toLowerCase(), metaProvider);
+    } else {
+      catalogProviders_ = Collections.emptyMap();
+    }
+  }
+
+  @Override
+  public Set<String> getCatalogNames() {
+    return catalogProviders_.keySet();
+  }
+
+  @Override
+  public FeCatalog getCatalog(String catalogName) {
+    MetaProvider provider = catalogProviders_.get(catalogName);
+    if (provider == null) return null;
+    if (provider == metaProvider_) return this;
+    return catalogs_.computeIfAbsent(catalogName, n -> new LocalCatalog(provider));
   }
 
   public String getProviderURI() {

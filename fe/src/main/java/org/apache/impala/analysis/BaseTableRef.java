@@ -84,7 +84,12 @@ public class BaseTableRef extends TableRef {
     String tableSampleSql = "";
     if (sampleParams_ != null) tableSampleSql = " " + sampleParams_.toSql(options);
     String tableHintsSql = ToSqlUtils.getPlanHintsSql(options, tableHints_);
-    return getTable().getTableName().toSql() +
+    // Keep the catalog of catalog-qualified names.
+    String catalogSql = "";
+    if (resolvedPath_.getRootCatalog() != null) {
+      catalogSql = ToSqlUtils.getIdentSql(resolvedPath_.getRootCatalog()) + ".";
+    }
+    return catalogSql + getTable().getTableName().toSql() +
         timeTravelSql + aliasSql + tableSampleSql + tableHintsSql;
   }
 

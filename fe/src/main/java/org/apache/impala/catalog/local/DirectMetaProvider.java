@@ -37,6 +37,7 @@ import org.apache.hadoop.hive.metastore.api.TableMeta;
 import org.apache.impala.authorization.AuthorizationPolicy;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.DataSource;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.catalog.FileDescriptor;
 import org.apache.impala.catalog.FileMetadataLoader;
 import org.apache.impala.catalog.Function;
@@ -87,6 +88,11 @@ class DirectMetaProvider implements MetaProvider {
 
   public String getURI() {
     return "HMS (URI TODO)";
+  }
+
+  @Override
+  public String getCatalogName() {
+    return FeCatalog.DEFAULT_CATALOG;
   }
 
   private static synchronized void initMsClientPool() {

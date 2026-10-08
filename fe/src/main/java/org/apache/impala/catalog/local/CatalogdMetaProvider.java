@@ -60,6 +60,7 @@ import org.apache.impala.authorization.AuthorizationPolicy;
 import org.apache.impala.catalog.AuthzCacheInvalidation;
 import org.apache.impala.catalog.IcebergContentFileStore;
 import org.apache.impala.catalog.Catalog;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.catalog.CatalogDeltaLog;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogObjectCache;
@@ -406,6 +407,11 @@ public class CatalogdMetaProvider implements MetaProvider {
 
   public String getURI() {
     return "Catalogd (URI TODO)";
+  }
+
+  @Override
+  public String getCatalogName() {
+    return FeCatalog.DEFAULT_CATALOG;
   }
 
   public TUniqueId getCatalogServiceId() {

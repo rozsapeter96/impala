@@ -145,6 +145,10 @@ public class Path {
   // belong to a catalog table/view.
   private final FeTable rootTable_;
 
+  // Catalog name that qualified the root table in the raw path ('catalog.db.tbl'), or
+  // null if the root table was not referenced with a catalog-qualified name.
+  private final String rootCatalog_;
+
   // Root path that a relative path was created from.
   private final Path rootPath_;
 
@@ -185,6 +189,7 @@ public class Path {
     Preconditions.checkNotNull(rootDesc);
     Preconditions.checkNotNull(rawPath);
     rootTable_ = rootDesc.getTable();
+    rootCatalog_ = null;
     rootDesc_ = rootDesc;
     rootPath_ = null;
     rawPath_ = rawPath;
@@ -194,9 +199,18 @@ public class Path {
    * Constructs a Path rooted at the given rootTable.
    */
   public Path(FeTable rootTable, List<String> rawPath) {
+    this(rootTable, null, rawPath);
+  }
+
+  /**
+   * Constructs a Path rooted at the given rootTable that was referenced with a name
+   * qualified by 'rootCatalog' if it is non-null.
+   */
+  public Path(FeTable rootTable, String rootCatalog, List<String> rawPath) {
     Preconditions.checkNotNull(rootTable);
     Preconditions.checkNotNull(rawPath);
     rootTable_ = rootTable;
+    rootCatalog_ = rootCatalog;
     rootDesc_ = null;
     rootPath_ = null;
     rawPath_ = rawPath;
@@ -210,6 +224,7 @@ public class Path {
     Preconditions.checkState(rootPath.isResolved());
     Preconditions.checkNotNull(relRawPath);
     rootTable_ = rootPath.rootTable_;
+    rootCatalog_ = rootPath.rootCatalog_;
     rootDesc_ = rootPath.rootDesc_;
     rootPath_ = rootPath;
     rawPath_ = Lists.newArrayListWithCapacity(
@@ -342,6 +357,18 @@ public class Path {
   }
 
   public FeTable getRootTable() { return rootTable_; }
+  public String getRootCatalog() { return rootCatalog_; }
+
+  /**
+   * Returns the name of the root table, qualified with the root catalog if the table
+   * was referenced with a catalog-qualified name.
+   */
+  public TableName getRootTableName() {
+    Preconditions.checkState(rootTable_ != null);
+    TableName name = rootTable_.getTableName();
+    if (rootCatalog_ == null) return name;
+    return new TableName(rootCatalog_, name.getDb(), name.getTbl(), name.getVTbl());
+  }
   public TupleDescriptor getRootDesc() { return rootDesc_; }
   public boolean isRootedAtTable() { return rootTable_ != null; }
   public boolean isRootedAtTuple() { return rootDesc_ != null; }
@@ -434,7 +461,8 @@ public class Path {
    * @return {@link List} of {@link String}s with each element of the list containing an
    *         individual piece of the path. Element {@code 0} contains the database,
    *         element {@code 1} contains the table, and all elements after contain the
-   *         remaining pieces of the path.
+   *         remaining pieces of the path. If the root table was referenced with a
+   *         catalog-qualified name, the catalog precedes the database.
    */
   public List<String> getFullyQualifiedRawPath(boolean preferAlias) {
     Preconditions.checkState(rootTable_ != null || rootDesc_ != null);
@@ -442,6 +470,7 @@ public class Path {
     if (rootDesc_ != null && (preferAlias || rootTable_ == null)) {
       builder.addAll(Arrays.asList(rootDesc_.getAlias().split("\\.")));
     } else {
+      if (rootCatalog_ != null) builder.add(rootCatalog_);
       builder.add(rootTable_.getDb().getName());
       builder.add(rootTable_.getName());
       if (rootTable_ instanceof IcebergMetadataTable) {

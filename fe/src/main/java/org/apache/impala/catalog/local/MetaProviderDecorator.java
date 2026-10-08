@@ -62,6 +62,11 @@ public abstract class MetaProviderDecorator implements MetaProvider {
     return this.decoratedObj_.getURI();
   }
 
+  @Override
+  public String getCatalogName() {
+    return this.decoratedObj_.getCatalogName();
+  }
+
   public AuthorizationPolicy getAuthPolicy() {
     return this.decoratedObj_.getAuthPolicy();
   }

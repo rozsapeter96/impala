@@ -126,8 +126,17 @@ public class StmtMetadataLoader {
     private void validate() {
       // Checks that all entries in 'tables' have a matching entry in 'dbs'.
       for (TableName tbl: tables.keySet()) {
-        Preconditions.checkState(dbs.contains(tbl.getDb()));
+        Preconditions.checkState(dbs.contains(getDbKey(tbl)));
       }
+    }
+
+    /**
+     * Returns the entry of 'dbs' for the database of 'tblName': 'catalog.db' for
+     * catalog-qualified names, 'db' otherwise.
+     */
+    public static String getDbKey(TableName tblName) {
+      if (tblName.getCatalog() == null) return tblName.getDb();
+      return tblName.getCatalog() + "." + tblName.getDb();
     }
   }
 
@@ -337,9 +346,13 @@ public class StmtMetadataLoader {
   private @Nullable Pair<TableName, FeTable> loadFeTable(
       FeCatalog catalog, TableName tblName) {
     if (loadedOrFailedTbls_.containsKey(tblName)) return null;
+    if (tblName.getCatalog() != null) {
+      catalog = catalog.getCatalog(tblName.getCatalog());
+      if (catalog == null) return null;
+    }
     FeDb db = catalog.getDb(tblName.getDb());
     if (db == null) return null;
-    dbs_.add(tblName.getDb());
+    dbs_.add(StmtTableCache.getDbKey(tblName));
     FeTable tbl = db.getTable(tblName.getTbl());
     if (tbl == null) return null;
     return Pair.create(tblName, tbl);
@@ -481,15 +494,22 @@ public class StmtMetadataLoader {
    * given 'stmt' to succeed. This is done by collecting all table references from 'stmt'
    * and generating all possible table-path resolutions considered during analysis.
    * Uses 'sessionDb_' to construct the candidate tables with
-   * PathResolver.getCandidateTables().
+   * PathResolver.getCandidateTables(), and adds the catalog-qualified table of
+   * PathResolver.getCatalogQualifiedTable() if a path starts with a catalog name.
    */
   public Set<TableName> collectTableCandidates(StatementBase stmt) {
     Preconditions.checkNotNull(stmt);
     List<TableRef> tblRefs = new ArrayList<>();
     stmt.collectTableRefs(tblRefs);
     Set<TableName> tableNames = new HashSet<>();
+    Set<String> catalogNames = null;
     for (TableRef ref: tblRefs) {
       tableNames.addAll(PathResolver.getCandidateTables(ref.getPath(), sessionDb_));
+      if (ref.getPath().size() < 3) continue;
+      if (catalogNames == null) catalogNames = fe_.getCatalog().getCatalogNames();
+      TableName catalogQualified =
+          PathResolver.getCatalogQualifiedTable(ref.getPath(), catalogNames);
+      if (catalogQualified != null) tableNames.add(catalogQualified);
     }
     return tableNames;
   }

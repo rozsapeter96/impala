@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -47,6 +48,8 @@ import org.apache.impala.thrift.TPartialTableInfo;
 import org.apache.impala.thrift.TValidWriteIdList;
 import org.apache.impala.util.ListMap;
 import org.apache.thrift.TException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * MetaProvider implementation that proxies calls through a chain of MetaProviders. First,
@@ -56,6 +59,7 @@ import org.apache.thrift.TException;
  * partition key-value fetching is directed to the primary provider.
  */
 public class MultiMetaProvider implements MetaProvider {
+  private final static Logger LOG = LoggerFactory.getLogger(MultiMetaProvider.class);
 
   private final MetaProvider primaryProvider_;
   private final List<MetaProvider> secondaryProviders_;
@@ -68,6 +72,27 @@ public class MultiMetaProvider implements MetaProvider {
 
   public MetaProvider getPrimaryProvider() {
     return primaryProvider_;
+  }
+
+  /**
+   * Returns the providers that serve a named catalog by catalog name, in the order in
+   * which they are tried. If several providers have the same catalog name, the first
+   * one wins.
+   */
+  public Map<String, MetaProvider> getCatalogProviders() {
+    Map<String, MetaProvider> result = new LinkedHashMap<>();
+    List<MetaProvider> providers = new ArrayList<>();
+    providers.add(primaryProvider_);
+    providers.addAll(secondaryProviders_);
+    for (MetaProvider provider : providers) {
+      String name = provider.getCatalogName();
+      if (name == null) continue;
+      if (result.putIfAbsent(name.toLowerCase(), provider) != null) {
+        LOG.warn("Catalog name {} is used by more than one metadata provider, " +
+            "using {}", name, result.get(name.toLowerCase()).getURI());
+      }
+    }
+    return result;
   }
 
   @Override

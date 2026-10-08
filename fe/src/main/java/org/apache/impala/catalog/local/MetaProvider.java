@@ -62,6 +62,13 @@ import com.google.errorprone.annotations.Immutable;
 public interface MetaProvider {
 
   String getURI();
+
+  /**
+   * Returns the name of the catalog this provider serves, which can be used to qualify
+   * table names, or null if its tables can not be referenced by a catalog name.
+   */
+  default String getCatalogName() { return null; }
+
   /**
    * Get the authorization policy. This acts as a repository of authorization
    * metadata.

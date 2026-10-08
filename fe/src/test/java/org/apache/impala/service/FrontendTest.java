@@ -509,6 +509,13 @@ public class FrontendTest extends FrontendTestBase {
         db, Arrays.asList(db, "mydb"), Arrays.asList("mydb.tbl", db + ".mydb"));
     TestCollectRequiredObjectsHelper("DESCRIBE mydb.tbl.complex_col.nested_col",
         db, Arrays.asList(db, "mydb"), Arrays.asList("mydb.tbl", db + ".mydb"));
+    // Tables of the default catalog can be referenced with catalog-qualified names.
+    TestCollectRequiredObjectsHelper("SELECT * FROM default.mydb.tbl",
+        db, Arrays.asList(db, "default", "mydb"),
+        Arrays.asList(db + ".default", "default.mydb", "mydb.tbl"));
+    TestCollectRequiredObjectsHelper("SELECT * FROM other_catalog.mydb.tbl",
+        db, Arrays.asList(db, "other_catalog"),
+        Arrays.asList(db + ".other_catalog", "other_catalog.mydb"));
     TestCollectRequiredObjectsHelper("DESCRIBE HISTORY foo",
         db, Arrays.asList(db), Arrays.asList(db + ".foo"));
     TestCollectRequiredObjectsHelper("DESCRIBE HISTORY mydb.tbl",

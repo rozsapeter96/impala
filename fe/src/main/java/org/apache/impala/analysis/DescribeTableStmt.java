@@ -135,7 +135,7 @@ public class DescribeTableStmt extends StatementBase {
     // What this essentially means is if we have DROP a privilege on a particular table,
     // this check will succeed, but the column-level filtering logic will filter out
     // all columns returning an empty result due to insufficient VIEW_METADATA privilege.
-    analyzer.getTable(table_.getTableName(), /* add column-level privilege */ true,
+    analyzer.getTable(path_.getRootTableName(), /* add column-level privilege */ true,
         Privilege.ANY);
     checkMinimalForIcebergMetadataTable();
 

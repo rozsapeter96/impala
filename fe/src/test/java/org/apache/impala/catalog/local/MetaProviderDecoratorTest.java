@@ -65,7 +65,7 @@ public class MetaProviderDecoratorTest {
 
   // Expected number of public methods in MetaProvider interface
   // Update this constant when adding new methods to MetaProvider
-  private static final int EXPECTED_METHOD_COUNT = 24;
+  private static final int EXPECTED_METHOD_COUNT = 25;
 
   @Test
   public void testMetaProviderMethodCount() {
@@ -121,6 +121,7 @@ public class MetaProviderDecoratorTest {
 
     // Configure mock behavior
     when(mockDecorated.getURI()).thenReturn(expectedUri);
+    when(mockDecorated.getCatalogName()).thenReturn("test-catalog");
     when(mockDecorated.getAuthPolicy()).thenReturn(expectedAuthPolicy);
     when(mockDecorated.isReady()).thenReturn(expectedIsReady);
     when(mockDecorated.loadDbList()).thenReturn(expectedDbList);
@@ -156,6 +157,10 @@ public class MetaProviderDecoratorTest {
     String actualUri = fixture.getURI();
     assertThat(actualUri, equalTo(expectedUri));
     verify(mockDecorated).getURI();
+
+    // Test getCatalogName()
+    assertThat(fixture.getCatalogName(), equalTo("test-catalog"));
+    verify(mockDecorated).getCatalogName();
 
     // Test getAuthPolicy()
     AuthorizationPolicy actualAuthPolicy = fixture.getAuthPolicy();

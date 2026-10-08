@@ -16,6 +16,7 @@
 // under the License.
 package org.apache.impala.catalog;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
@@ -35,6 +36,29 @@ import javax.annotation.Nullable;
  * Interface between the front-end (analysis and planning) classes and the Catalog.
  */
 public interface FeCatalog {
+  /**
+   * Name of the catalog of the tables and views that come from the Hive Metastore
+   * (through catalogd). Table names can be qualified with a catalog name:
+   * 'catalog.db.tbl'.
+   */
+  String DEFAULT_CATALOG = "default";
+
+  /**
+   * Returns the lower-case names of the catalogs that table names can be qualified
+   * with.
+   */
+  default Set<String> getCatalogNames() {
+    return Collections.singleton(DEFAULT_CATALOG);
+  }
+
+  /**
+   * Returns the catalog with the given name, which contains only the dbs and tables of
+   * that catalog, or null if there is no such catalog.
+   */
+  default @Nullable FeCatalog getCatalog(String catalogName) {
+    return DEFAULT_CATALOG.equals(catalogName) ? this : null;
+  }
+
   /** @see Catalog#getDbs(PatternMatcher) */
   List<? extends FeDb> getDbs(PatternMatcher matcher);
 

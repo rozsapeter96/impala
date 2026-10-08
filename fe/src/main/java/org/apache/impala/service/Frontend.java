@@ -2430,6 +2430,13 @@ public class Frontend {
       tableNames = new HashSet<>();
       for (TableRef ref : tblRefs) {
         tableNames.addAll(PathResolver.getCandidateTables(ref.getPath(), sessionDb));
+        // Tables of the default catalog (the HMS) can also be referenced with a
+        // catalog-qualified name.
+        TableName hmsTable = PathResolver.getCatalogQualifiedTable(ref.getPath(),
+            Collections.singleton(FeCatalog.DEFAULT_CATALOG));
+        if (hmsTable != null) {
+          tableNames.add(new TableName(hmsTable.getDb(), hmsTable.getTbl()));
+        }
       }
     }
     Set<String> dbNames = new HashSet<>();

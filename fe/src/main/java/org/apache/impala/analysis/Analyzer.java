@@ -40,7 +40,6 @@ import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.impala.analysis.Path.PathType;
 import org.apache.impala.analysis.StmtMetadataLoader.StmtTableCache;
 import org.apache.impala.authorization.AuthorizationConfig;
@@ -1219,6 +1218,20 @@ public class Analyzer {
     }
 
     Preconditions.checkNotNull(resolvedPath);
+    TableRef result = createResolvedTableRef(tableRef, resolvedPath);
+    // Table refs of catalog-qualified names can also be referred to by the implicit
+    // alias 'catalog.db.tbl'.
+    if (resolvedPath.getRootCatalog() != null && resolvedPath.destTable() != null) {
+      result.addCatalogQualifiedAlias(resolvedPath.getRootCatalog());
+    }
+    return result;
+  }
+
+  /**
+   * Returns the table ref that replaces 'tableRef' after its path was resolved to
+   * 'resolvedPath'.
+   */
+  private TableRef createResolvedTableRef(TableRef tableRef, Path resolvedPath) {
     if (resolvedPath.destTable() != null) {
       FeTable table = resolvedPath.destTable();
       if (table instanceof FeView) return new InlineViewRef((FeView) table, tableRef);
@@ -3694,8 +3707,8 @@ public class Analyzer {
    */
   public FeTable getTable(TableName tblName, boolean mustExist)
       throws AnalysisException, TableLoadingException {
-    if (getPathResolver().isIcebergMetadataTable(tblName.toPath())) {
-      return getMetadataVirtualTable(tblName.toPath());
+    if (getPathResolver().isIcebergMetadataTable(tblName)) {
+      return getMetadataVirtualTable(tblName);
     }
     FeTable table = globalState_.stmtTableCache.tables.get(tblName);
     if (table == null) {
@@ -3741,17 +3754,14 @@ public class Analyzer {
    * table exists or creates and adds it to the stmtTableCache if it does not exist. At
    * this point it is unknown if the base table is loaded for scanning as well, therefore
    * the original table is kept. The metadata table will have its vTbl field filled, while
-   * the original table gets a new key without the vTbl field. 'tblRefPath' parameter has
-   * to be an IcebergMetadataTable reference path. Returns the the Iceberg metadata table.
+   * the original table gets a new key without the vTbl field. 'virtualTableName' has
+   * to name an Iceberg metadata table. Returns the the Iceberg metadata table.
    */
-  public FeTable getMetadataVirtualTable(List<String> tblRefPath)
+  public FeTable getMetadataVirtualTable(TableName virtualTableName)
       throws AnalysisException {
-    Preconditions.checkArgument(PathResolver.canBeIcebergMetadataTable(tblRefPath));
+    Preconditions.checkArgument(virtualTableName.getVTbl() != null);
     try {
-      TableName catalogTableName = new TableName(tblRefPath.get(0),
-          tblRefPath.get(1));
-      TableName virtualTableName = new TableName(tblRefPath.get(0),
-          tblRefPath.get(1), tblRefPath.get(2));
+      TableName catalogTableName = virtualTableName.getBaseTableName();
       // The catalog table (the base of the virtual table) has been loaded and cached
       // under the name of the virtual table.
       FeTable catalogTable = getStmtTableCache().tables.get(virtualTableName);
@@ -3761,13 +3771,13 @@ public class Analyzer {
       Preconditions.checkState(catalogTable instanceof FeIcebergTable);
       FeIcebergTable catalogIceTable = (FeIcebergTable) catalogTable;
       IcebergMetadataTable virtualTable =
-          new IcebergMetadataTable(catalogIceTable, tblRefPath.get(2));
+          new IcebergMetadataTable(catalogIceTable, virtualTableName.getVTbl());
       getStmtTableCache().tables.put(catalogTableName, catalogTable);
       getStmtTableCache().tables.put(virtualTableName, virtualTable);
       return virtualTable;
     } catch (ImpalaRuntimeException e) {
       throw new AnalysisException("Could not create metadata table for table "
-          + "reference: " + StringUtils.join(tblRefPath, "."), e);
+          + "reference: " + virtualTableName, e);
     }
   }
 
@@ -3807,7 +3817,18 @@ public class Analyzer {
    * does not exist. Does *not* force-load the table.
    */
   public FeTable getTableNoThrow(String dbName, String tableName) {
-    FeDb db = getCatalog().getDb(dbName);
+    return getTableNoThrow(null, dbName, tableName);
+  }
+
+  /**
+   * Same as getTableNoThrow(String, String) for a table of the catalog
+   * 'catalogName', or of the catalog of the session if 'catalogName' is null.
+   */
+  public FeTable getTableNoThrow(String catalogName, String dbName, String tableName) {
+    FeCatalog catalog = getCatalog();
+    if (catalogName != null) catalog = catalog.getCatalog(catalogName);
+    if (catalog == null) return null;
+    FeDb db = catalog.getDb(dbName);
     if (db == null) return null;
     return db.getTableIfCached(tableName);
   }
@@ -3850,7 +3871,8 @@ public class Analyzer {
     TableName fqTableName = getFqTableName(tableName);
     // Get the ownership information if the table exists. We do not want it to throw
     // without registering privileges.
-    FeTable table = getTableNoThrow(fqTableName.getDb(), fqTableName.getTbl());
+    FeTable table = getTableNoThrow(fqTableName.getCatalog(), fqTableName.getDb(),
+        fqTableName.getTbl());
     final String tableOwner = table == null ? null : table.getOwnerUser();
     for (Privilege priv : privilege) {
       if (priv == Privilege.ANY || addColumnPrivilege) {
@@ -3866,7 +3888,8 @@ public class Analyzer {
       }
     }
     // Propagate the AnalysisException if the table/db does not exist.
-    table = getTable(fqTableName.getDb(), fqTableName.getTbl(), /* must_exist */ true);
+    table = getTable(new TableName(fqTableName.getCatalog(), fqTableName.getDb(),
+        fqTableName.getTbl(), null), /* must_exist */ true);
     Preconditions.checkNotNull(table);
     if (addAccessEvent) {
       // Add an audit event for this access

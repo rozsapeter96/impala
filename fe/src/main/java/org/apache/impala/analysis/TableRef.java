@@ -20,6 +20,7 @@ package org.apache.impala.analysis;
 import static org.apache.impala.analysis.ToSqlOptions.DEFAULT;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -369,6 +370,19 @@ public class TableRef extends StmtNode {
    * be ambiguous).
    */
   public String getUniqueAlias() { return aliases_[0]; }
+
+  /**
+   * Adds the implicit alias 'catalog.<first implicit alias>' to this table ref if it
+   * has no explicit alias. Used for table refs whose table was referenced with a
+   * catalog-qualified name ('catalog.db.tbl').
+   */
+  void addCatalogQualifiedAlias(String catalog) {
+    if (hasExplicitAlias()) return;
+    Preconditions.checkState(aliases_ != null && aliases_.length > 0);
+    String[] aliases = Arrays.copyOf(aliases_, aliases_.length + 1);
+    aliases[aliases_.length] = catalog + "." + aliases_[0];
+    aliases_ = aliases;
+  }
 
   /**
    * Returns true if this table ref has an explicit alias.

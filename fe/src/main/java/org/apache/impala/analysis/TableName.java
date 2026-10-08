@@ -39,6 +39,9 @@ import org.apache.impala.util.CatalogBlacklistUtils;
  * tables, currently only supported for Iceberg tables.
  */
 public class TableName {
+  // Catalog that qualifies the name ('catalog.db.tbl'), null if the name is not
+  // catalog-qualified. See FeCatalog.getCatalogNames().
+  private final String catalog_;
   private final String db_;
   private final String tbl_;
   private final String vTbl_;
@@ -48,7 +51,13 @@ public class TableName {
   }
 
   public TableName(String db, String tbl, String vTbl) {
+    this(null, db, tbl, vTbl);
+  }
+
+  public TableName(String catalog, String db, String tbl, String vTbl) {
     super();
+    Preconditions.checkArgument(catalog == null || (db != null && !catalog.isEmpty()));
+    this.catalog_ = catalog;
     Preconditions.checkArgument(db == null || !db.isEmpty());
     this.db_ = db;
     Preconditions.checkNotNull(tbl);
@@ -81,6 +90,7 @@ public class TableName {
     return null;
   }
 
+  public String getCatalog() { return catalog_; }
   public String getDb() { return db_; }
   public String getTbl() { return tbl_; }
   public String getVTbl() { return vTbl_; }
@@ -113,6 +123,7 @@ public class TableName {
     // Enclose the database and/or table name in quotes if Hive cannot parse them
     // without quotes. This is needed for view compatibility between Impala and Hive.
     StringBuilder result = new StringBuilder();
+    if (catalog_ != null) result.append(ToSqlUtils.getIdentSql(catalog_) + ".");
     if (db_ == null) {
       result.append(ToSqlUtils.getIdentSql(tbl_));
     } else {
@@ -127,6 +138,7 @@ public class TableName {
   @Override
   public String toString() {
     StringBuilder result = new StringBuilder();
+    if (catalog_ != null) result.append(catalog_ + ".");
     if (db_ == null) {
       result.append(tbl_);
     } else {
@@ -139,7 +151,8 @@ public class TableName {
   }
 
   public List<String> toPath() {
-    List<String> result = Lists.newArrayListWithCapacity(3);
+    List<String> result = Lists.newArrayListWithCapacity(4);
+    if (catalog_ != null) result.add(catalog_);
     if (db_ != null) result.add(db_);
     result.add(tbl_);
     if (vTbl_ != null && !vTbl_.isEmpty()) result.add(vTbl_);
@@ -157,8 +170,16 @@ public class TableName {
   public TTableName toThrift() { return new TTableName(db_, tbl_); }
 
   /**
+   * Returns the name without its virtual table part, e.g. the name of the base table
+   * of an Iceberg metadata table.
+   */
+  public TableName getBaseTableName() {
+    return new TableName(catalog_, db_, tbl_, null);
+  }
+
+  /**
    * Returns true of the table names are considered equals. To check for equality,
-   * a case-insensitive comparison of the database and table name is performed.
+   * a case-insensitive comparison of the catalog, database and table name is performed.
    */
   @Override
   public boolean equals(Object anObject) {

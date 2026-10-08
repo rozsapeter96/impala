@@ -22,6 +22,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.impala.catalog.FeTable;
 import org.apache.impala.common.FrontendTestBase;
@@ -29,6 +30,7 @@ import org.apache.impala.service.FeSupport;
 import org.junit.Test;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableSet;
 
 /**
  * Maps out the precedence of path resolution: which object a (possibly dotted) name in
@@ -37,8 +39,7 @@ import com.google.common.base.Joiner;
  * to (its root table or root tuple alias and the remaining path), so a change of the
  * resolution order shows up as a test failure.
  *
- * Resolution tiers, in order of precedence (see Analyzer.resolveTableRef() and
- * Analyzer.resolvePath()):
+ * Resolution tiers, in order of precedence (see PathResolver):
  *   1. WITH-clause views; single-part names only.
  *   2. Table aliases registered in the current query block: explicit aliases, implicit
  *      unqualified aliases ('tbl') and implicit qualified aliases ('db.tbl').
@@ -48,11 +49,9 @@ import com.google.common.base.Joiner;
  *      resolved together, so they are ambiguous if both resolve. If p2 names an
  *      Iceberg metadata table type, 'p0.p1.p2' is a metadata table.
  *   4. The same tiers in the enclosing query blocks (correlated references).
- *
- * IMPALA-13698 adds catalog-qualified names ('catalog.db.tbl'). Existing
- * interpretations keep their precedence; the catalog-qualified interpretation is only
- * tried when none of the above resolve. Tests marked with 'IMPALA-13698' pin the
- * behavior of such paths before catalog-level resolution exists.
+ *   5. Catalog-qualified names ('catalog.db.tbl'), only if none of the above resolve:
+ *      the implicit alias 'catalog.db.tbl' of a table ref and the catalog-qualified
+ *      table. The test catalog has a single catalog, 'default'.
  */
 public class PathResolutionTest extends FrontendTestBase {
 
@@ -88,7 +87,9 @@ public class PathResolutionTest extends FrontendTestBase {
       sb.append("alias:").append(p.getRootDesc().getAlias());
     } else {
       FeTable tbl = p.getRootTable();
-      sb.append("table:").append(tbl.getFullName().toLowerCase());
+      sb.append("table:");
+      if (p.getRootCatalog() != null) sb.append(p.getRootCatalog()).append(".");
+      sb.append(tbl.getFullName().toLowerCase());
     }
     sb.append(" path:").append(Joiner.on(".").join(p.getRawPath()));
     return sb.toString();
@@ -152,9 +153,23 @@ public class PathResolutionTest extends FrontendTestBase {
         "s.db.history", "db.ice.history");
     assertCandidates(Arrays.asList("ice", "snapshots"), "db",
         "db.ice", "ice.snapshots");
-    // A catalog-qualified name produces no 'cat.db.tbl' candidate yet.
-    // IMPALA-13698: add a third candidate if 'cat' is a known catalog.
+    // Catalog-qualified names are not among the candidates; they are only considered
+    // if none of the candidates resolve.
     assertCandidates(Arrays.asList("cat", "db", "tbl"), "s", "s.cat", "cat.db");
+    Set<String> catalogs = ImmutableSet.of("cat");
+    assertCatalogQualified(Arrays.asList("cat", "db", "tbl"), catalogs, "cat.db.tbl");
+    assertCatalogQualified(Arrays.asList("CAT", "db", "tbl", "x"), catalogs,
+        "CAT.db.tbl");
+    assertCatalogQualified(Arrays.asList("cat", "db", "ice", "snapshots"), catalogs,
+        "cat.db.ice.snapshots");
+    assertCatalogQualified(Arrays.asList("cat", "db"), catalogs, null);
+    assertCatalogQualified(Arrays.asList("db", "tbl", "col"), catalogs, null);
+  }
+
+  private void assertCatalogQualified(List<String> path, Set<String> catalogs,
+      String expected) {
+    TableName t = PathResolver.getCatalogQualifiedTable(path, catalogs);
+    assertEquals(String.join(".", path), expected, t == null ? null : t.toString());
   }
 
   /** Tier 1: WITH-clause views shadow catalog tables, but only single-part names. */
@@ -335,23 +350,93 @@ public class PathResolutionTest extends FrontendTestBase {
   }
 
   /**
-   * IMPALA-13698: catalog-qualified names. None of these resolve yet; once catalog
-   * names are known they resolve when no existing interpretation does.
+   * Tier 5: catalog-qualified names. The test catalog has one catalog, 'default'.
    */
   @Test
   public void TestCatalogQualifiedNames() {
     addTestTables();
+    assertTableRef("select id from default.pathdb.t", null, 0,
+        "BaseTableRef table:default.pathdb.t path:");
+    assertTableRef("select item from default.pathdb.t.arr", null, 0,
+        "CollectionTableRef table:default.pathdb.t path:arr");
+    assertTableRef("select 1 from default.pathdb.t.s.arr", "pathdb", 0,
+        "CollectionTableRef table:default.pathdb.t path:s.arr");
+    assertTableRef("select * from default." + ICE_TBL + ".snapshots", null, 0,
+        "IcebergMetadataTableRef table:default." + ICE_TBL + ".snapshots path:");
+    // The table ref has the implicit aliases 'catalog.db.tbl', 'db.tbl' and 'tbl'.
+    assertSlotRef("select default.pathdb.t.id from default.pathdb.t", null,
+        "alias:pathdb.t path:id");
+    assertSlotRef("select default.pathdb.t.s.f from default.pathdb.t", null,
+        "alias:pathdb.t path:s.f");
+    assertSlotRef("select pathdb.t.id from default.pathdb.t", null,
+        "alias:pathdb.t path:id");
+    assertSlotRef("select t.id from default.pathdb.t", null, "alias:pathdb.t path:id");
+    assertTableRef("select 1 from default.pathdb.t, default.pathdb.t.arr", null, 1,
+        "CollectionTableRef alias:pathdb.t path:arr");
+    assertTableRef("select 1 from default.pathdb.t, t.arr", null, 1,
+        "CollectionTableRef alias:pathdb.t path:arr");
+    AnalyzesOk("select default.pathdb.t.* from default.pathdb.t");
+    AnalyzesOk("select default.pathdb.t.s.* from default.pathdb.t");
+    AnalysisError("select 1 from default.pathdb.t, pathdb.t",
+        "Duplicate table alias: 'pathdb.t'");
+    // An explicit alias replaces all implicit aliases.
+    AnalysisError("select default.pathdb.t.id from default.pathdb.t x",
+        "Could not resolve column/field reference: 'default.pathdb.t.id'");
+    // The catalog is kept when the statement is printed, e.g. for view definitions.
+    assertEquals("SELECT id FROM `default`.pathdb.t",
+        AnalyzesOk("select id from default.pathdb.t").toSql());
+    // DESCRIBE paths.
+    AnalyzesOk("describe default.pathdb.t");
+    AnalyzesOk("describe default.pathdb.t.s");
+    // Errors are reported for the catalog-qualified table if it exists.
+    AnalysisError("select 1 from default.pathdb.t.id",
+        "Illegal table reference to non-collection type: 'default.pathdb.t.id'");
+    AnalysisError("select 1 from default.pathdb.nope",
+        "Could not resolve table reference: 'default.pathdb.nope'");
+    // Unknown catalogs.
     AnalysisError("select 1 from cat.pathdb.t",
         "Could not resolve table reference: 'cat.pathdb.t'");
-    AnalysisError("select 1 from cat.pathdb.t.arr",
-        "Could not resolve table reference: 'cat.pathdb.t.arr'");
     AnalysisError("select 1 from cat." + ICE_TBL + ".snapshots",
         "Could not resolve table reference: 'cat." + ICE_TBL + ".snapshots'");
-    // A database named like a catalog keeps its current meaning.
-    assertTableRef("select 1 from a.a.a", null, 0,
-        "CollectionTableRef table:a.a path:a");
+    // A catalog table in the current block hides the alias of an outer block, just like
+    // for names that are not catalog-qualified.
+    SelectStmt stmt = analyzeSelect(
+        "select 1 from default.pathdb.t, (select item from default.pathdb.t.arr) v",
+        null);
+    SelectStmt inner = (SelectStmt) ((InlineViewRef) stmt.getTableRefs().get(1))
+        .getViewStmt();
+    assertEquals("CollectionTableRef table:default.pathdb.t path:arr",
+        describe(inner.getTableRefs().get(0)));
     // Statements that take a 'table_name' accept at most two parts.
-    AnalysisError("drop table cat.pathdb.t", "Syntax error in line 1");
-    AnalysisError("compute stats cat.pathdb.t", "Syntax error in line 1");
+    AnalysisError("drop table default.pathdb.t", "Syntax error in line 1");
+    AnalysisError("compute stats default.pathdb.t", "Syntax error in line 1");
+  }
+
+  /**
+   * Tier 5 only applies if no other interpretation of the path is legal, so names that
+   * resolve without a catalog keep their meaning.
+   */
+  @Test
+  public void TestCatalogQualifiedNamePrecedence() {
+    addTestTables();
+    // Table 'pathdb' in database 'default' with a collection 't': 'default.pathdb.t'
+    // is that collection, not table 't' of database 'pathdb' in catalog 'default'.
+    addTestTable("create table default.pathdb (t array<int>)");
+    assertTableRef("select 1 from default.pathdb.t", null, 0,
+        "CollectionTableRef table:default.pathdb path:t");
+    // With session db 'default', 'pathdb.t' is now ambiguous as well: table pathdb.t
+    // and collection t of default.pathdb.
+    AnalysisError("select 1 from pathdb.t", "Table reference is ambiguous: 'pathdb.t'");
+    assertTableRef("select 1 from pathdb.t", "a", 0, "BaseTableRef table:pathdb.t path:");
+    // An alias named like the catalog wins over the catalog.
+    assertTableRef("select 1 from pathdb.u `default`, default.arr", null, 1,
+        "CollectionTableRef alias:default path:arr");
+    // An ambiguous path stays ambiguous: the catalog-qualified table is not tried.
+    // With session db 'x', 'default.pathdb.t' is collection pathdb.t of table
+    // x.default and collection t of table default.pathdb.
+    addTestDb("x", null);
+    addTestTable("create table x.`default` (pathdb struct<t:array<int>>)");
+    AnalysisError("select 1 from default.pathdb.t", createAnalysisCtx("x"),
+        "Table reference is ambiguous: 'default.pathdb.t'");
   }
 }

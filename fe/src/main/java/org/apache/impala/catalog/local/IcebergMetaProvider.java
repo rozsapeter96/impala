@@ -118,6 +118,14 @@ public class IcebergMetaProvider implements MetaProvider {
     return "Iceberg REST (" + iceCatalog_.getUri() + ")";
   }
 
+  /**
+   * The REST catalog name if it is unique among the configured catalogs.
+   */
+  @Override
+  public String getCatalogName() {
+    return dmlCatalogName_;
+  }
+
   public void setAuthzChecker(
       AtomicReference<? extends AuthorizationChecker> authzChecker) {
     authzChecker_ = authzChecker;
