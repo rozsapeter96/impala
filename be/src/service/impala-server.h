@@ -669,6 +669,11 @@ class ImpalaServer : public ImpalaServiceIf,
     /// The default database (changed as a result of 'use' query execution).
     std::string database;
 
+    /// The catalog of the session, set by USE. Empty until the first USE: the session
+    /// is then in the initial catalog, which the frontend determines (the default
+    /// catalog, the HMS, if there is one). See TSessionState.catalog.
+    std::string catalog;
+
     /// Reference to the ImpalaServer's query options
     TQueryOptions* server_default_query_options;
 

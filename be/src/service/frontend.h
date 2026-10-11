@@ -84,8 +84,8 @@ class Frontend {
   /// be set to the user's current session. If this is an Impala internal request,
   /// the session should be set to NULL which will skip privilege checks returning all
   /// results.
-  /// If 'catalog' is not NULL, 'db' is a database of that catalog ('SHOW TABLES IN
-  /// catalog.db'), otherwise 'db' is looked up in all catalogs.
+  /// If 'catalog' is not NULL, 'db' is a database of that catalog, otherwise 'db' is
+  /// looked up in all catalogs.
   Status GetTableNames(const std::string& db, const std::string* pattern,
       const TSessionState* session, const std::set<TImpalaTableType::type>& table_types,
       TGetTablesResult* table_names, const std::string* catalog = nullptr);

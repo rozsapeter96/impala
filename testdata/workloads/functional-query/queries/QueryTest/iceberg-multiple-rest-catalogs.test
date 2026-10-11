@@ -14,19 +14,26 @@ SHOW DATABASES LIKE "berg";
 STRING, STRING
 ====
 ---- QUERY
-USE ice;
+# 'ice' is a database of catalog 'rest-1', 'berg' of catalog 'rest-2'.
+USE `rest-1`.ice;
 ====
 ---- QUERY
-SELECT lat FROM berg.airports_parquet WHERE iata = '00R';
+SELECT lat FROM `rest-2`.berg.airports_parquet WHERE iata = '00R';
 ---- RESULTS
 30.68586111
 ---- TYPES
 DOUBLE
 ====
 ---- QUERY
+# Names without a catalog are resolved in the session catalog.
+SELECT lat FROM berg.airports_parquet WHERE iata = '00R';
+---- CATCH
+Could not resolve table reference: 'berg.airports_parquet'
+====
+---- QUERY
 SELECT ice_air.iata, ice_air.lat, berg_air.lon
 FROM ice.airports_parquet ice_air
-INNER JOIN berg.airports_parquet berg_air
+INNER JOIN `rest-2`.berg.airports_parquet berg_air
 ON berg_air.iata = ice_air.iata AND berg_air.iata = "00M"
 ---- RESULTS
 '00M',31.95376472,-89.2345047

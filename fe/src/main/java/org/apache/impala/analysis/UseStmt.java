@@ -22,34 +22,63 @@ import org.apache.impala.catalog.Catalog;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.thrift.TUseDbParams;
 
+import com.google.common.base.Preconditions;
+
 /**
- * Representation of a USE db statement.
+ * Representation of a USE [catalog.]db statement.
+ *
+ * 'USE catalog.db' sets the session catalog as well (TSessionState.catalog): names
+ * that are not catalog-qualified are then resolved in that catalog. 'USE db' sets
+ * the database of the session catalog.
  */
 public class UseStmt extends StatementBase {
-  private final String database_;
+  // The new session database as parsed, with its catalog if it was given.
+  private final QualifiedDbName db_;
+
+  // The new session database with the session catalog, set during analysis.
+  private QualifiedDbName sessionDb_;
 
   public UseStmt(String db) {
-    database_ = db;
+    this(null, db);
   }
 
-  public String getDatabase() { return database_; }
+  public UseStmt(String catalog, String db) {
+    // Catalog names are case-insensitive.
+    db_ = new QualifiedDbName(catalog == null ? null : catalog.toLowerCase(), db);
+  }
+
+  /** Returns the new session database, without its catalog. */
+  public String getDatabase() { return db_.getDb(); }
+
+  /** Returns the new session catalog, or null if the session catalog is kept. */
+  public String getCatalog() { return db_.getCatalog(); }
+
+  /** Returns the new session database with its catalog. Only valid after analysis. */
+  public QualifiedDbName getSessionDb() { return Preconditions.checkNotNull(sessionDb_); }
 
   @Override
-  public String toSql(ToSqlOptions options) {
-    return "USE " + database_;
-  }
+  public String toSql(ToSqlOptions options) { return "USE " + db_.toSql(); }
 
   @Override
   public void analyze(Analyzer analyzer) throws AnalysisException {
-    if (!database_.equalsIgnoreCase(Catalog.DEFAULT_DB)) {
-      // USE <default> should always be allowed.
-      analyzer.getDb(database_, Privilege.ANY, true);
+    if (db_.getCatalog() != null) {
+      if (!analyzer.getCatalog().getCatalogNames().contains(db_.getCatalog())) {
+        throw new AnalysisException("Catalog does not exist: " + db_.getCatalog());
+      }
+      sessionDb_ = db_;
+    } else {
+      sessionDb_ = new QualifiedDbName(analyzer.getSessionCatalog(), db_.getDb());
+    }
+    // USE <default> should always be allowed.
+    if (db_.getCatalog() != null || !db_.getDb().equalsIgnoreCase(Catalog.DEFAULT_DB)) {
+      analyzer.getDb(sessionDb_, Privilege.ANY);
     }
   }
 
   public TUseDbParams toThrift() {
     TUseDbParams params = new TUseDbParams();
-    params.setDb(getDatabase());
+    params.setDb(getSessionDb().getDb());
+    params.setCatalog(getSessionDb().getCatalog());
     return params;
   }
 }

@@ -20,6 +20,7 @@ package org.apache.impala.analysis;
 import java.util.List;
 
 import org.apache.impala.catalog.Catalog;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.thrift.TTableName;
@@ -123,7 +124,7 @@ public class TableName {
     // Enclose the database and/or table name in quotes if Hive cannot parse them
     // without quotes. This is needed for view compatibility between Impala and Hive.
     StringBuilder result = new StringBuilder();
-    if (catalog_ != null) result.append(ToSqlUtils.getIdentSql(catalog_) + ".");
+    if (hasPrintedCatalog()) result.append(ToSqlUtils.getIdentSql(catalog_) + ".");
     if (db_ == null) {
       result.append(ToSqlUtils.getIdentSql(tbl_));
     } else {
@@ -135,10 +136,19 @@ public class TableName {
     return result.toString();
   }
 
+  /**
+   * Returns true if toSql() and toString() print the catalog: only catalogs other than
+   * the default catalog, so that names of the default catalog (the HMS) print as they
+   * did without catalogs, e.g. in view definitions.
+   */
+  private boolean hasPrintedCatalog() {
+    return catalog_ != null && !catalog_.equalsIgnoreCase(FeCatalog.DEFAULT_CATALOG);
+  }
+
   @Override
   public String toString() {
     StringBuilder result = new StringBuilder();
-    if (catalog_ != null) result.append(catalog_ + ".");
+    if (hasPrintedCatalog()) result.append(catalog_ + ".");
     if (db_ == null) {
       result.append(tbl_);
     } else {

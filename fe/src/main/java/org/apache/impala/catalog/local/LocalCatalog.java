@@ -98,15 +98,18 @@ public class LocalCatalog implements FeCatalog {
     if (metaProvider instanceof CatalogdMetaProvider) {
       catalogServiceId_ = ((CatalogdMetaProvider) metaProvider).getCatalogServiceId();
     }
+    Map<String, MetaProvider> catalogProviders = Collections.emptyMap();
     if (metaProvider instanceof MultiMetaProvider) {
-      catalogProviders_ = ((MultiMetaProvider) metaProvider).getCatalogProviders();
+      catalogProviders = ((MultiMetaProvider) metaProvider).getCatalogProviders();
     } else if (metaProvider.getCatalogName() != null
         && !metaProvider.getCatalogName().contains(".")) {
-      catalogProviders_ = Collections.singletonMap(
+      catalogProviders = Collections.singletonMap(
           metaProvider.getCatalogName().toLowerCase(), metaProvider);
-    } else {
-      catalogProviders_ = Collections.emptyMap();
     }
+    // A provider without a usable catalog name is the default catalog, so that the
+    // session catalog (initially the default catalog) can always be resolved.
+    catalogProviders_ = catalogProviders.isEmpty() ?
+        Collections.singletonMap(DEFAULT_CATALOG, metaProvider) : catalogProviders;
   }
 
   @Override

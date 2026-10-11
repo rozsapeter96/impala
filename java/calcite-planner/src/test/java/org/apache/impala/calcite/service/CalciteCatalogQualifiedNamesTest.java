@@ -34,8 +34,9 @@ import org.apache.impala.util.EventSequence;
 import org.junit.Test;
 
 /**
- * Catalog-qualified table names ('catalog.db.tbl') in the Calcite planner. The results
- * must match the original planner.
+ * Catalog-qualified table names ('catalog.db.tbl') and the session catalog
+ * ('USE catalog.db') in the Calcite planner. The results must match the original
+ * planner.
  */
 public class CalciteCatalogQualifiedNamesTest extends FrontendTestBase {
 
@@ -87,5 +88,16 @@ public class CalciteCatalogQualifiedNamesTest extends FrontendTestBase {
     AnalysisContext ctx = createAnalysisCtx("functional");
     ctx.getQueryCtx().client_request.setStmt(sql);
     parseAndAnalyze(sql, ctx, new CalciteCompilerFactory());
+  }
+
+  @Test
+  public void testSessionCatalog() throws ImpalaException {
+    addTestCatalogName("other");
+    assertParity("select id from alltypestiny", "other.functional");
+    assertParity("select id from functional.alltypestiny", "other.functional");
+    assertParity("select id from `default`.functional.alltypestiny", "other.functional");
+    assertParity("with t as (select id from alltypestiny) select id from t",
+        "other.functional");
+    assertParity("select id from alltypestiny", "default.functional");
   }
 }

@@ -2073,7 +2073,9 @@ public class ParserTest extends FrontendTestBase {
     ParserError("USE");
     ParserError("USE db1 db2");
     ParsesOk("USE db1");
-    ParserError("USE cat1.db1");
+    // Database qualified with a catalog (IMPALA-13698).
+    ParsesOk("USE cat1.db1");
+    ParsesOk("USE `rest-1`.db1");
     ParserError("USE cat1.db1.tbl1");
   }
 

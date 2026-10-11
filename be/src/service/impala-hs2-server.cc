@@ -392,6 +392,8 @@ void ImpalaServer::OpenSession(TOpenSessionResp& return_val,
         HS2_RETURN_IF_ERROR(return_val, status, SQLSTATE_GENERAL_ERROR);
       } else if (iequals(v.first, "use:database")) {
         state->database = v.second;
+      } else if (iequals(v.first, "use:catalog")) {
+        state->catalog = v.second;
       } else {
         string key = v.first, value = v.second;
         // Hive JDBC will add a prefix to the configuration, see IMPALA-11992

@@ -33,6 +33,7 @@ import org.apache.impala.analysis.Analyzer;
 import org.apache.impala.analysis.InsertStmt;
 import org.apache.impala.analysis.ParsedStatement;
 import org.apache.impala.analysis.ParseNode;
+import org.apache.impala.analysis.QualifiedDbName;
 import org.apache.impala.analysis.StatementBase;
 import org.apache.impala.analysis.StmtMetadataLoader;
 import org.apache.impala.analysis.StmtMetadataLoader.StmtTableCache;
@@ -293,8 +294,8 @@ public class FrontendTestBase extends AbstractFrontendTest {
   public StatementBase AnalyzesOkNoRewrite(ParsedStatement stmt) throws ImpalaException {
     try (FrontendProfile.Scope scope = FrontendProfile.createNewWithScope()) {
       AnalysisContext ctx = createAnalysisCtx();
-      StmtMetadataLoader mdLoader =
-          new StmtMetadataLoader(frontend_, ctx.getQueryCtx().session.database, null);
+      StmtMetadataLoader mdLoader = new StmtMetadataLoader(frontend_,
+          QualifiedDbName.fromSession(ctx.getQueryCtx().session), null, null, null);
       StmtTableCache loadedTables = mdLoader.loadTables(stmt);
       Analyzer analyzer = AnalysisDriverImpl.createAnalyzer(ctx, loadedTables);
       StatementBase stmtBase = (StatementBase) stmt.getTopLevelNode();
@@ -375,8 +376,8 @@ public class FrontendTestBase extends AbstractFrontendTest {
       ParsedStatement parsedStmt =
           compilerFactory.createParsedStatement(ctx.getQueryCtx());
       User user = new User(TSessionStateUtil.getEffectiveUser(ctx.getQueryCtx().session));
-      StmtMetadataLoader mdLoader = new StmtMetadataLoader(
-          fe, ctx.getQueryCtx().session.database, null, user, null);
+      StmtMetadataLoader mdLoader = new StmtMetadataLoader(fe,
+          QualifiedDbName.fromSession(ctx.getQueryCtx().session), null, user, null);
       StmtTableCache stmtTableCache = mdLoader.loadTables(parsedStmt);
       AnalysisResult analysisResult = ctx.analyzeAndAuthorize(compilerFactory, parsedStmt,
           stmtTableCache, fe.getAuthzChecker());

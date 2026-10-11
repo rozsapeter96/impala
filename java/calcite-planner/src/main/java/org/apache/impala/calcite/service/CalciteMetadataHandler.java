@@ -52,6 +52,7 @@ import org.apache.impala.common.ImpalaException;
 import org.apache.impala.thrift.TQueryCtx;
 
 import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import java.util.ArrayList;
@@ -84,15 +85,17 @@ public class CalciteMetadataHandler {
    */
   public static CalciteCatalogReader createCalciteCatalogReader(
       StmtMetadataLoader.StmtTableCache stmtTableCache, TQueryCtx queryCtx,
-      String database) {
+      QualifiedDbName sessionDb) {
     RelDataTypeFactory typeFactory = ImpalaTypeFactoryImpl.INSTANCE;
     Properties props = new Properties();
     props.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "false");
     CalciteConnectionConfig config = new CalciteConnectionConfigImpl(props);
     CalciteSchema rootSchema = CalciteSchema.createRootSchema(true);
-    // Names are resolved in the session database, then in the root schema.
+    // Names are resolved in the session database, then in the session catalog, then
+    // in the root schema (catalog-qualified names). See populateCalciteSchema().
     List<List<String>> schemaPaths = new ArrayList<>();
-    schemaPaths.add(Collections.singletonList(database));
+    schemaPaths.add(ImmutableList.of(sessionDb.getCatalog(), sessionDb.getDb()));
+    schemaPaths.add(Collections.singletonList(sessionDb.getCatalog()));
     schemaPaths.add(Collections.emptyList());
     return new ImpalaCalciteCatalogReader(rootSchema, schemaPaths,
         typeFactory, config, queryCtx, stmtTableCache);
@@ -199,7 +202,7 @@ public class CalciteMetadataHandler {
    * tableNames
    */
   public static class TableVisitor extends SqlBasicVisitor<Void> {
-    // The session database.
+    // The session database, optionally qualified with the session catalog.
     private final QualifiedDbName currentDb_;
     private final Map<TableName, List<TimeTravelSpec>> tableNames_ = new HashMap<>();
 
@@ -213,8 +216,10 @@ public class CalciteMetadataHandler {
     // the top of the stack.
     public final Stack<Set<TableName>> withItemTableNames_ = new Stack<>();
 
-    public TableVisitor(String currentDb) {
-      this.currentDb_ = new QualifiedDbName(null, currentDb.toLowerCase());
+    public TableVisitor(QualifiedDbName currentDb) {
+      String catalog = currentDb.getCatalog();
+      if (catalog != null) catalog = catalog.toLowerCase();
+      this.currentDb_ = new QualifiedDbName(catalog, currentDb.getDb().toLowerCase());
     }
 
     public Set<TableName> getTableNames() {

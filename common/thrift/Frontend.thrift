@@ -315,7 +315,7 @@ struct TShowTablesParams {
   3: optional string show_pattern
 
   // The catalog of 'db' if the database was qualified with a catalog
-  // (SHOW TABLES IN catalog.db). See TGetTablesParams.catalog.
+  // (SHOW TABLES IN catalog.db, or the session catalog). See TGetTablesParams.catalog.
   5: optional string catalog
 
   // This specifies the types of tables that should be returned. If not set, all types of
@@ -430,9 +430,13 @@ struct TGetFunctionsResult {
   4: list<string> fn_persistence
 }
 
-// Parameters for the USE db command
+// Parameters for the USE [catalog.]db command
 struct TUseDbParams {
   1: required string db
+
+  // The catalog of the new session database (TSessionState.catalog): the catalog of
+  // 'USE catalog.db', or the current session catalog for 'USE db'.
+  2: optional string catalog
 }
 
 // Results of an EXPLAIN

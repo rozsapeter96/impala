@@ -832,6 +832,8 @@ void ImpalaHttpHandler::FillSessionsInfo(Document* document) {
 
     Value default_db(state->database, document->GetAllocator());
     session_json.AddMember("default_database", default_db, document->GetAllocator());
+    Value catalog(state->catalog, document->GetAllocator());
+    session_json.AddMember("catalog", catalog, document->GetAllocator());
 
     Value start_time(ToStringFromUnixMillis(session.second->start_time_ms,
         TimePrecision::Second), document->GetAllocator());

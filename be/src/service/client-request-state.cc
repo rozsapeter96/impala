@@ -444,7 +444,11 @@ Status ClientRequestState::ExecLocalCatalogOp(
   switch (catalog_op.op_type) {
     case TCatalogOpType::USE: {
       lock_guard<mutex> l(session_->lock);
-      session_->database = exec_request().catalog_op_request.use_db_params.db;
+      const TUseDbParams& params = exec_request().catalog_op_request.use_db_params;
+      session_->database = params.db;
+      // The frontend sets the catalog of the new session database: the catalog of
+      // 'USE catalog.db', or the current session catalog for 'USE db'.
+      if (params.__isset.catalog) session_->catalog = params.catalog;
       return Status::OK();
     }
     case TCatalogOpType::SHOW_TABLES:

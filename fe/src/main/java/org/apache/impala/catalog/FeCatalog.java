@@ -59,6 +59,17 @@ public interface FeCatalog {
     return DEFAULT_CATALOG.equalsIgnoreCase(catalogName) ? this : null;
   }
 
+  /**
+   * Returns the name of the catalog that sessions start in (TSessionState.catalog):
+   * the default catalog (the HMS) if there is one, otherwise the first configured
+   * catalog.
+   */
+  default String getInitialCatalogName() {
+    Set<String> names = getCatalogNames();
+    if (names.isEmpty() || names.contains(DEFAULT_CATALOG)) return DEFAULT_CATALOG;
+    return names.iterator().next();
+  }
+
   /** @see Catalog#getDbs(PatternMatcher) */
   List<? extends FeDb> getDbs(PatternMatcher matcher);
 

@@ -16,7 +16,7 @@ row_regex:.*Fetched 0 row.*
 # Blacklisted tables cannot be inserted into.
 insert into airports_parquet (iata) values ('foo');
 ---- CATCH
-row_regex:.*AnalysisException: Table does not exist: ice.airports_parquet
+row_regex:.*AnalysisException: Table does not exist: rest-1.ice.airports_parquet
 ====
 ---- QUERY
 # Cannot create tables via Iceberg REST Catalog, guard against that functionality

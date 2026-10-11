@@ -53,7 +53,8 @@ public class InlineViewRef extends TableRef {
 
   // For catalog views and table masking views: the catalog that the view or the masked
   // table was referenced in, null if it was referenced without a catalog. The view
-  // definition is analyzed in this catalog, see Analyzer.setViewCatalog().
+  // definition is analyzed with this catalog instead of the session catalog, see
+  // Analyzer.setViewCatalog().
   private String viewCatalog_ = null;
 
   // If not null, these will serve as the column labels for the inline view. This provides
@@ -220,7 +221,7 @@ public class InlineViewRef extends TableRef {
     // Analyze the inline view query statement with its own analyzer
     inlineViewAnalyzer_ = new Analyzer(analyzer);
     // The definition of a catalog view and the policies of a table masking view refer
-    // to tables of the catalog of the view.
+    // to tables of the catalog of the view, regardless of the session catalog.
     if (isCatalogView() || isTableMaskingView_) {
       inlineViewAnalyzer_.setViewCatalog(viewCatalog_);
     }

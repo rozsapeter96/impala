@@ -885,6 +885,12 @@ struct TSessionState {
 
   // If set, the latest Kudu timestamp observed within this session.
   7: optional i64 kudu_latest_observed_ts;
+
+  // The catalog of the session, set by USE. Names that are not qualified with a
+  // catalog are resolved in this catalog. If not set, the session is in the initial
+  // catalog, which the frontend fills in: the default catalog (the HMS) if there is
+  // one. See FeCatalog.getInitialCatalogName() in the frontend.
+  8: optional string catalog
 }
 
 // Context of this query, including the client request, session state and

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
@@ -69,10 +70,16 @@ public class ConfigLoader {
     return propertiesList;
   }
 
+  /**
+   * Returns the config files of 'configDirectory' sorted by name, so that the order of
+   * the catalogs, e.g. the catalog that sessions start in without an HMS
+   * (FeCatalog.getInitialCatalogName()), does not depend on the file system.
+   */
   List<File> listFiles(File configDirectory) {
     Preconditions.checkState(configDirectory.exists() && configDirectory.isDirectory());
     return Stream.of(configDirectory.listFiles())
         .filter(file -> !file.isDirectory())
+        .sorted(Comparator.comparing(File::getName))
         .collect(Collectors.toList());
   }
 

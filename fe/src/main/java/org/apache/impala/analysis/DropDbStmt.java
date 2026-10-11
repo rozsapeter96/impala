@@ -18,6 +18,7 @@
 package org.apache.impala.analysis;
 
 import org.apache.impala.authorization.Privilege;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.catalog.FeDb;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.thrift.TDropDbParams;
@@ -91,7 +92,10 @@ public class DropDbStmt extends StatementBase {
       throw new AnalysisException(Analyzer.DB_DOES_NOT_EXIST_ERROR_MSG + dbName_);
     }
 
-    if (analyzer.getDefaultDb().toLowerCase().equals(dbName_.toLowerCase())) {
+    // DROP DATABASE drops a database of the default catalog.
+    String sessionCatalog = analyzer.getSessionCatalog();
+    if ((sessionCatalog == null || sessionCatalog.equals(FeCatalog.DEFAULT_CATALOG))
+        && analyzer.getDefaultDb().toLowerCase().equals(dbName_.toLowerCase())) {
       throw new AnalysisException("Cannot drop current default database: " + dbName_);
     }
     if (db != null && db.numFunctions() > 0 && !cascade_) {

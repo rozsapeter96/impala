@@ -202,9 +202,18 @@ public final class CatalogBlacklistUtils {
    */
   public static void verifyTableName(TableName table) throws AnalysisException {
     if (isTableBlacklisted(table)) {
-      throw new AnalysisException("Invalid table/view name: " + table
+      throw new AnalysisException("Invalid table/view name: " + withoutCatalog(table)
           + ". It has been blacklisted using --blacklisted_tables");
     }
+  }
+
+  /**
+   * Returns 'table' without its catalog. Blacklisted table names are 'db.tbl' and apply
+   * to the tables of that name of every catalog.
+   */
+  private static TableName withoutCatalog(TableName table) {
+    if (table.getCatalog() == null) return table;
+    return new TableName(table.getDb(), table.getTbl(), table.getVTbl());
   }
 
   /**
@@ -215,7 +224,7 @@ public final class CatalogBlacklistUtils {
    */
   public static boolean isTableBlacklisted(TableName table) {
     if (!table.getDb().equalsIgnoreCase(Db.SYS)) {
-      return BLACKLISTED_TABLES.contains(table);
+      return BLACKLISTED_TABLES.contains(withoutCatalog(table));
     }
 
     return BLACKLISTED_DBS.contains(Db.SYS) && !IMPALA_SYS_TABLES.contains(

@@ -48,6 +48,7 @@ import javax.json.JsonWriterFactory;
 import javax.json.stream.JsonGenerator;
 
 import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.impala.analysis.QualifiedDbName;
 import org.apache.impala.catalog.Catalog;
 import org.apache.impala.common.PrintUtils;
 import org.apache.impala.thrift.TClientRequest;
@@ -399,17 +400,31 @@ public class TestUtils {
   }
 
   /**
-   * Create a TQueryCtx for executing FE tests using the given default DB and user.
-   * Expr rewrites are disabled by default and should be enabled by the caller
-   * if so desired.
+   * Parses a database name given as 'db' or 'catalog.db', the format in which tests
+   * specify the session database of a query context ('USE catalog.db').
+   */
+  public static QualifiedDbName parseQualifiedDb(String name) {
+    int dot = name.indexOf('.');
+    if (dot < 0) return new QualifiedDbName(null, name);
+    return new QualifiedDbName(name.substring(0, dot), name.substring(dot + 1));
+  }
+
+  /**
+   * Create a TQueryCtx for executing FE tests using the given default DB and user,
+   * see parseQualifiedDb(). Expr rewrites are disabled by default and should be enabled
+   * by the caller if so desired.
    */
   public static TQueryCtx createQueryContext(String defaultDb,
       String user, TQueryOptions options) {
     TQueryCtx queryCtx = new TQueryCtx();
     queryCtx.setClient_request(new TClientRequest("FeTests", options));
     queryCtx.setQuery_id(new TUniqueId());
+    QualifiedDbName sessionDb = parseQualifiedDb(defaultDb);
     queryCtx.setSession(new TSessionState(new TUniqueId(), TSessionType.BEESWAX,
-        defaultDb, user, new TNetworkAddress("localhost", 0)));
+        sessionDb.getDb(), user, new TNetworkAddress("localhost", 0)));
+    if (sessionDb.getCatalog() != null) {
+      queryCtx.session.setCatalog(sessionDb.getCatalog());
+    }
     SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSSSSS");
     Date now = Calendar.getInstance().getTime();
     queryCtx.setNow_string(formatter.format(now));

@@ -19,6 +19,7 @@ package org.apache.impala.analysis;
 
 import org.apache.impala.catalog.FeFsTable;
 import org.apache.impala.catalog.FeTable;
+import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.common.AnalysisException;
 
 import com.google.common.base.Preconditions;
@@ -84,10 +85,12 @@ public class BaseTableRef extends TableRef {
     String tableSampleSql = "";
     if (sampleParams_ != null) tableSampleSql = " " + sampleParams_.toSql(options);
     String tableHintsSql = ToSqlUtils.getPlanHintsSql(options, tableHints_);
-    // Keep the catalog of catalog-qualified names.
+    // Keep the catalog of names of catalogs other than the default catalog, see
+    // TableName.toSql().
     String catalogSql = "";
-    if (resolvedPath_.getRootCatalog() != null) {
-      catalogSql = ToSqlUtils.getIdentSql(resolvedPath_.getRootCatalog()) + ".";
+    String catalog = resolvedPath_.getRootCatalog();
+    if (catalog != null && !catalog.equalsIgnoreCase(FeCatalog.DEFAULT_CATALOG)) {
+      catalogSql = ToSqlUtils.getIdentSql(catalog) + ".";
     }
     return catalogSql + getTable().getTableName().toSql() +
         timeTravelSql + aliasSql + tableSampleSql + tableHintsSql;

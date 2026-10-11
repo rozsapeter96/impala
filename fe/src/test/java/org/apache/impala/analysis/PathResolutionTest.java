@@ -27,6 +27,7 @@ import java.util.Set;
 import org.apache.impala.catalog.FeTable;
 import org.apache.impala.common.FrontendTestBase;
 import org.apache.impala.service.FeSupport;
+import org.apache.impala.testutil.TestUtils;
 import org.junit.Test;
 
 import com.google.common.base.Joiner;
@@ -124,8 +125,8 @@ public class PathResolutionTest extends FrontendTestBase {
 
   private void assertCandidates(List<String> path, String sessionDb,
       String... expected) {
-    List<TableName> candidates =
-        PathResolver.getCandidateTables(path, new QualifiedDbName(null, sessionDb));
+    List<TableName> candidates = PathResolver.getCandidateTables(path,
+        TestUtils.parseQualifiedDb(sessionDb));
     String[] actual = new String[candidates.size()];
     for (int i = 0; i < candidates.size(); ++i) {
       TableName t = candidates.get(i);
@@ -180,16 +181,16 @@ public class PathResolutionTest extends FrontendTestBase {
     assertTableRef("with t as (select 1 as v) select v from t", "pathdb", 0, "view:t");
     // A qualified name skips WITH-clause views.
     assertTableRef("with t as (select 1 as v) select id from pathdb.t", null, 0,
-        "BaseTableRef table:pathdb.t path:");
+        "BaseTableRef table:default.pathdb.t path:");
     AnalysisError("with t as (select 1 as v) select v from pathdb.t",
         "Could not resolve column/field reference: 'v'");
     // Collection paths starting with the name of a WITH-clause view are not resolved
     // relative to the view.
     assertTableRef("with t as (select 1 as v) select item from pathdb.t.arr", null, 0,
-        "CollectionTableRef table:pathdb.t path:arr");
+        "CollectionTableRef table:default.pathdb.t path:arr");
     // ... but against the catalog table with the same name in the session database.
     assertTableRef("with t as (select 1 as v) select item from t.arr", "pathdb", 0,
-        "CollectionTableRef table:pathdb.t path:arr");
+        "CollectionTableRef table:default.pathdb.t path:arr");
   }
 
   /** Tier 2: registered table aliases take precedence over catalog tables. */
@@ -211,7 +212,7 @@ public class PathResolutionTest extends FrontendTestBase {
     // An explicit alias hides the implicit aliases of the same table ref: the second
     // ref is a catalog path again.
     assertTableRef("select 1 from pathdb.u x, pathdb.u.arr", null, 1,
-        "CollectionTableRef table:pathdb.u path:arr");
+        "CollectionTableRef table:default.pathdb.u path:arr");
     // Ambiguity between two registered aliases.
     AnalysisError("select 1 from pathdb.t, pathdb.u t, t.arr",
         "Duplicate table alias: 't'");
@@ -270,23 +271,26 @@ public class PathResolutionTest extends FrontendTestBase {
   @Test
   public void TestCatalogTablePrecedence() {
     addTestTables();
-    assertTableRef("select 1 from t", "pathdb", 0, "BaseTableRef table:pathdb.t path:");
-    assertTableRef("select 1 from pathdb.t", "a", 0, "BaseTableRef table:pathdb.t path:");
+    assertTableRef("select 1 from t", "pathdb", 0,
+        "BaseTableRef table:default.pathdb.t path:");
+    assertTableRef("select 1 from pathdb.t", "a", 0,
+        "BaseTableRef table:default.pathdb.t path:");
     assertTableRef("select 1 from t.arr", "pathdb", 0,
-        "CollectionTableRef table:pathdb.t path:arr");
+        "CollectionTableRef table:default.pathdb.t path:arr");
     assertTableRef("select 1 from pathdb.t.s.arr", null, 0,
-        "CollectionTableRef table:pathdb.t path:s.arr");
+        "CollectionTableRef table:default.pathdb.t path:s.arr");
     // If both interpretations resolve, the path is ambiguous ('a.a' and 'a.a.a' with
     // session db 'a', see AnalyzeStmtsTest#TestTableRefPathAmbiguity).
     // Only one interpretation resolves: 'a.a.a.a' is not a valid path of a.a with
     // session db 'a' (a.a + a.a.a needs a struct between the two collections).
     assertTableRef("select 1 from a.a.a.a", "a", 0,
-        "CollectionTableRef table:a.a path:a.a");
+        "CollectionTableRef table:default.a.a path:a.a");
     assertTableRef("select 1 from a.a.a", null, 0,
-        "CollectionTableRef table:a.a path:a");
+        "CollectionTableRef table:default.a.a path:a");
     // A database and a table of the session db with the same name: 'a.b' is table a.b
     // in session db 'pathdb' because pathdb.a does not exist.
-    assertTableRef("select 1 from a.b", "pathdb", 0, "BaseTableRef table:a.b path:");
+    assertTableRef("select 1 from a.b", "pathdb", 0,
+        "BaseTableRef table:default.a.b path:");
     AnalysisError("select 1 from pathdb.nope",
         "Could not resolve table reference: 'pathdb.nope'");
     AnalysisError("select 1 from pathdb.t.nope",
@@ -299,9 +303,9 @@ public class PathResolutionTest extends FrontendTestBase {
   @Test
   public void TestIcebergMetadataTables() {
     assertTableRef("select * from " + ICE_TBL + ".snapshots", null, 0,
-        "IcebergMetadataTableRef table:" + ICE_TBL + ".snapshots path:");
+        "IcebergMetadataTableRef table:default." + ICE_TBL + ".snapshots path:");
     assertTableRef("select * from " + ICE_TBL + ".HISTORY", null, 0,
-        "IcebergMetadataTableRef table:" + ICE_TBL + ".history path:");
+        "IcebergMetadataTableRef table:default." + ICE_TBL + ".history path:");
     assertSlotRef("select snapshot_id from " + ICE_TBL + ".snapshots", null,
         "alias:" + ICE_TBL + " path:snapshot_id");
     assertSlotRef("select s.snapshot_id from " + ICE_TBL + ".snapshots s", null,
@@ -334,7 +338,7 @@ public class PathResolutionTest extends FrontendTestBase {
     stmt = analyzeSelect("select 1 from pathdb.u t, (select item from t.arr) v",
         "pathdb");
     inner = (SelectStmt) ((InlineViewRef) stmt.getTableRefs().get(1)).getViewStmt();
-    assertEquals("CollectionTableRef table:pathdb.t path:arr",
+    assertEquals("CollectionTableRef table:default.pathdb.t path:arr",
         describe(inner.getTableRefs().get(0)));
   }
 
@@ -384,7 +388,7 @@ public class PathResolutionTest extends FrontendTestBase {
     AnalysisError("select default.pathdb.t.id from default.pathdb.t x",
         "Could not resolve column/field reference: 'default.pathdb.t.id'");
     // The catalog is kept when the statement is printed, e.g. for view definitions.
-    assertEquals("SELECT id FROM `default`.pathdb.t",
+    assertEquals("SELECT id FROM pathdb.t",
         AnalyzesOk("select id from default.pathdb.t").toSql());
     // DESCRIBE paths.
     AnalyzesOk("describe default.pathdb.t");
@@ -421,11 +425,12 @@ public class PathResolutionTest extends FrontendTestBase {
     // is that collection, not table 't' of database 'pathdb' in catalog 'default'.
     addTestTable("create table default.pathdb (t array<int>)");
     assertTableRef("select 1 from default.pathdb.t", null, 0,
-        "CollectionTableRef table:default.pathdb path:t");
+        "CollectionTableRef table:default.default.pathdb path:t");
     // With session db 'default', 'pathdb.t' is now ambiguous as well: table pathdb.t
     // and collection t of default.pathdb.
     AnalysisError("select 1 from pathdb.t", "Table reference is ambiguous: 'pathdb.t'");
-    assertTableRef("select 1 from pathdb.t", "a", 0, "BaseTableRef table:pathdb.t path:");
+    assertTableRef("select 1 from pathdb.t", "a", 0,
+        "BaseTableRef table:default.pathdb.t path:");
     // An alias named like the catalog wins over the catalog.
     assertTableRef("select 1 from pathdb.u `default`, default.arr", null, 1,
         "CollectionTableRef alias:default path:arr");
@@ -485,6 +490,59 @@ public class PathResolutionTest extends FrontendTestBase {
   }
 
   /**
+   * USE catalog.db sets the session catalog: names that are not catalog-qualified are
+   * resolved in that catalog. USE db clears it.
+   */
+  @Test
+  public void TestUseCatalog() {
+    addTestTables();
+    addTestCatalogName("other");
+    AnalyzesOk("use default.pathdb");
+    AnalyzesOk("use other.pathdb");
+    AnalyzesOk("use `OTHER`.pathdb");
+    UseStmt use = (UseStmt) AnalyzesOk("use OTHER.pathdb");
+    assertEquals("other", use.getCatalog());
+    assertEquals("pathdb", use.getDatabase());
+    assertEquals("USE other.pathdb", AnalyzesOk("use other.pathdb").toSql());
+    use = (UseStmt) AnalyzesOk("use pathdb");
+    assertEquals(null, use.getCatalog());
+    assertEquals("pathdb", use.getDatabase());
+    AnalysisError("use nope.pathdb", "Catalog does not exist: nope");
+    AnalysisError("use other.nope", "Database does not exist: other.nope");
+
+    // Session catalog 'other' (USE other.pathdb).
+    String session = "other.pathdb";
+    assertTableRef("select id from t", session, 0,
+        "BaseTableRef table:other.pathdb.t path:");
+    assertTableRef("select id from pathdb.t", session, 0,
+        "BaseTableRef table:other.pathdb.t path:");
+    assertTableRef("select item from t.arr", session, 0,
+        "CollectionTableRef table:other.pathdb.t path:arr");
+    // Catalog-qualified names refer to their catalog.
+    assertTableRef("select id from default.pathdb.t", session, 0,
+        "BaseTableRef table:default.pathdb.t path:");
+    // Table refs of the session catalog have the implicit alias 'catalog.db.tbl'.
+    assertSlotRef("select other.pathdb.t.id from t", session, "alias:pathdb.t path:id");
+    // The session catalog is kept when the statement is printed.
+    assertEquals("SELECT id FROM other.pathdb.t",
+        AnalyzesOk("select id from t", createAnalysisCtx(session)).toSql());
+    // Statements that only support the default catalog.
+    AnalysisError("drop table t", createAnalysisCtx(session),
+        "Table t is in catalog 'other'.");
+    AnalysisError("drop table pathdb.t", createAnalysisCtx(session),
+        "Table pathdb.t is in catalog 'other'.");
+    AnalyzesOk("drop table default.pathdb.t", createAnalysisCtx(session));
+    AnalyzesOk("insert into functional.alltypesnopart (int_col) values (1)",
+        createAnalysisCtx(session));
+    AnalyzesOk("describe t", createAnalysisCtx(session));
+
+    // Session catalog 'default'.
+    assertTableRef("select id from t", "default.pathdb", 0,
+        "BaseTableRef table:default.pathdb.t path:");
+    AnalyzesOk("drop table t", createAnalysisCtx("default.pathdb"));
+  }
+
+  /**
    * Asserts what the first table ref of the catalog view in the FROM clause of 'stmt'
    * resolves to.
    */
@@ -498,7 +556,7 @@ public class PathResolutionTest extends FrontendTestBase {
 
   /**
    * The definition of a catalog view is resolved in the catalog that the view was
-   * referenced in.
+   * referenced in, not in the session catalog.
    */
   @Test
   public void TestViewCatalog() {
@@ -506,26 +564,40 @@ public class PathResolutionTest extends FrontendTestBase {
     addTestCatalogName("other");
     addTestView("create view pathdb.v as select id from pathdb.t");
     addTestView("create view pathdb.w as select id from pathdb.v");
-    // Without a catalog, the tables of the view are looked up without a catalog.
+    // Without catalogs, the tables of the view are looked up without a catalog.
     assertViewTableRef("select id from pathdb.v", null,
-        "BaseTableRef table:pathdb.t path:");
-    assertViewTableRef("select id from v", "pathdb", "BaseTableRef table:pathdb.t path:");
-    // A catalog-qualified view is resolved in its catalog.
-    assertViewTableRef("select id from default.pathdb.v", null,
         "BaseTableRef table:default.pathdb.t path:");
-    assertViewTableRef("select id from other.pathdb.v", "pathdb",
+    assertViewTableRef("select id from pathdb.v", "pathdb",
+        "BaseTableRef table:default.pathdb.t path:");
+    // A view of the session catalog and its tables are in the session catalog.
+    assertViewTableRef("select id from v", "other.pathdb",
+        "BaseTableRef table:other.pathdb.t path:");
+    // A catalog-qualified view is resolved in its catalog, not in the session catalog.
+    assertViewTableRef("select id from default.pathdb.v", "other.pathdb",
+        "BaseTableRef table:default.pathdb.t path:");
+    assertViewTableRef("select id from other.pathdb.v", null,
+        "BaseTableRef table:other.pathdb.t path:");
+    assertViewTableRef("select id from other.pathdb.v", "default.pathdb",
         "BaseTableRef table:other.pathdb.t path:");
     // Nested views: the catalog of the outer view applies to the inner view.
-    SelectStmt select = analyzeSelect("select id from other.pathdb.w", null);
+    SelectStmt select =
+        analyzeSelect("select id from default.pathdb.w", "other.pathdb");
     SelectStmt w = (SelectStmt) ((InlineViewRef) select.getTableRefs().get(0))
         .getViewStmt();
     SelectStmt v = (SelectStmt) ((InlineViewRef) w.getTableRefs().get(0)).getViewStmt();
-    assertEquals("BaseTableRef table:other.pathdb.t path:",
+    assertEquals("BaseTableRef table:default.pathdb.t path:",
         describe(v.getTableRefs().get(0)));
-    // The catalog of the view does not apply outside of the view.
-    select = analyzeSelect("select v.id from other.pathdb.v, t", "pathdb");
-    assertEquals("BaseTableRef table:pathdb.t path:",
+    // The session catalog applies again outside of the view.
+    select = analyzeSelect("select v.id from default.pathdb.v, t", "other.pathdb");
+    assertEquals("BaseTableRef table:other.pathdb.t path:",
         describe(select.getTableRefs().get(1)));
+    // WITH-clause views are resolved in the session catalog.
+    select = analyzeSelect("with x as (select id from pathdb.t) select id from x",
+        "other.pathdb");
+    SelectStmt x = (SelectStmt) ((InlineViewRef) select.getTableRefs().get(0))
+        .getViewStmt();
+    assertEquals("BaseTableRef table:other.pathdb.t path:",
+        describe(x.getTableRefs().get(0)));
   }
 
   /** SHOW TABLES/VIEWS IN [catalog.]db. */
@@ -535,17 +607,19 @@ public class PathResolutionTest extends FrontendTestBase {
     addTestCatalogName("other");
     assertEquals("other.pathdb",
         ((ShowTablesStmt) AnalyzesOk("show tables in other.pathdb")).getDb().toString());
-    assertEquals("default.pathdb",
-        ((ShowTablesStmt) AnalyzesOk("show tables in default.pathdb like 't*'"))
-        .getDb().toString());
+    // The default catalog is not printed.
+    QualifiedDbName db =
+        ((ShowTablesStmt) AnalyzesOk("show tables in default.pathdb like 't*'")).getDb();
+    assertEquals("default", db.getCatalog());
+    assertEquals("pathdb", db.toString());
     AnalyzesOk("show views in other.pathdb");
     assertEquals("SHOW TABLES IN other.pathdb LIKE 't*'",
         AnalyzesOk("show tables in other.pathdb like 't*'").toSql());
     AnalysisError("show tables in nope.pathdb",
         "Database does not exist: nope.pathdb");
     AnalysisError("show tables in other.nope", "Database does not exist: other.nope");
-    // Without a database, the session database is used.
-    assertEquals("pathdb", ((ShowTablesStmt) AnalyzesOk("show tables",
-        createAnalysisCtx("pathdb"))).getDb().toString());
+    // Without a database, the session database including its catalog is used.
+    assertEquals("other.pathdb", ((ShowTablesStmt) AnalyzesOk("show tables",
+        createAnalysisCtx("other.pathdb"))).getDb().toString());
   }
 }

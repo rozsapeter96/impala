@@ -239,9 +239,9 @@ public class Analyzer {
   private boolean hasWithClause_ = false;
 
   // If set, replaces the session database of getSessionDb(): the session database
-  // qualified with the catalog of the view, for the analyzer of the definition of a
-  // catalog view or of a table masking view, see setViewCatalog(). Nested analyzers
-  // inherit it.
+  // with the catalog of the view instead of the session catalog, for the analyzer of
+  // the definition of a catalog view or of a table masking view, see setViewCatalog().
+  // Nested analyzers inherit it.
   private QualifiedDbName viewSessionDb_ = null;
 
   // If set, when masked privilege requests are registered they will use this error
@@ -3614,29 +3614,40 @@ public class Analyzer {
     return widestExprs;
   }
 
+  /**
+   * Returns the database of the session, without the session catalog. See
+   * getSessionDb().
+   */
   public String getDefaultDb() { return globalState_.queryCtx.session.database; }
 
   /**
-   * Returns the session database ('USE db') in which names that are not qualified with
-   * a database are resolved. It has no catalog: names that are not catalog-qualified
-   * are resolved in all catalogs. In the analyzer of a view definition (see
-   * setViewCatalog()), it is qualified with the catalog of the view.
+   * Returns the session database and catalog as set by 'USE [catalog.]db'. Names that
+   * are not catalog-qualified are resolved in the session catalog, which is initially
+   * the default catalog. In the analyzer of a view definition (see setViewCatalog()),
+   * the catalog of the view replaces the session catalog.
    */
   public QualifiedDbName getSessionDb() {
     if (viewSessionDb_ != null) return viewSessionDb_;
-    return new QualifiedDbName(null, getDefaultDb());
+    return QualifiedDbName.fromSession(globalState_.queryCtx.session);
   }
 
   /**
-   * Makes this analyzer resolve names that are not catalog-qualified in 'catalog'.
-   * Called for the analyzer of the definition of a catalog view, and of a table masking
-   * view, with the catalog the view or masked table was referenced in: 'catalog' is
-   * null if it was referenced without a catalog. The definition of a view only refers to
-   * tables of its own catalog.
+   * Makes this analyzer resolve names that are not catalog-qualified in 'catalog'
+   * instead of the session catalog. Called for the analyzer of the definition of a
+   * catalog view, and of a table masking view, with the catalog the view or masked
+   * table was referenced in: 'catalog' is null if it was referenced without a catalog.
+   * The definition of a view only refers to tables of its own catalog, so it must not
+   * depend on the session catalog.
    */
   public void setViewCatalog(String catalog) {
     viewSessionDb_ = new QualifiedDbName(catalog, getDefaultDb());
   }
+
+  /**
+   * Returns the catalog of the session ('USE catalog.db'), initially the default
+   * catalog. Names that are not catalog-qualified are resolved in the session catalog.
+   */
+  public String getSessionCatalog() { return getSessionDb().getCatalog(); }
 
   public String getFallbackDbForFunctions() {
     return getQueryCtx()
@@ -3741,12 +3752,19 @@ public class Analyzer {
     if (getPathResolver().isIcebergMetadataTable(tblName)) {
       return getMetadataVirtualTable(tblName);
     }
-    FeTable table = globalState_.stmtTableCache.tables.get(tblName);
+    // The cache is keyed by catalog-qualified names. A name without a catalog refers
+    // to the session catalog (or the catalog of the view definition being analyzed).
+    TableName key = tblName;
+    if (tblName.getCatalog() == null && tblName.getDb() != null) {
+      key = new TableName(getSessionCatalog(), tblName.getDb(), tblName.getTbl(),
+          tblName.getVTbl());
+    }
+    FeTable table = globalState_.stmtTableCache.tables.get(key);
     if (table == null) {
       if (!mustExist) {
         return null;
       }
-      if (!globalState_.stmtTableCache.dbs.contains(tblName.getDb())) {
+      if (!globalState_.stmtTableCache.dbs.contains(StmtTableCache.getDbKey(key))) {
         throw new AnalysisException(DB_DOES_NOT_EXIST_ERROR_MSG + tblName.getDb());
       } else {
         throw new AnalysisException(TBL_DOES_NOT_EXIST_ERROR_MSG + tblName.toString());
@@ -4000,7 +4018,7 @@ public class Analyzer {
 
   /**
    * Like getDb(String, Privilege), for a database that may be qualified with a catalog
-   * ('SHOW TABLES IN catalog.db'). A database without a catalog is
+   * ('USE catalog.db', 'SHOW TABLES IN catalog.db'). A database without a catalog is
    * looked up in all catalogs. Privileges are checked on the database name without its
    * catalog.
    */

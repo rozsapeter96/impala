@@ -14,7 +14,14 @@ SHOW DATABASES like "functional_parquet";
 STRING, STRING
 ====
 ---- QUERY
+# The session starts in the default catalog (the HMS). 'ice' is a database of the
+# REST catalog 'rest-1'.
 USE ice;
+---- CATCH
+Database does not exist: ice
+====
+---- QUERY
+USE `rest-1`.ice;
 ====
 ---- QUERY
 SELECT lat FROM airports_parquet WHERE iata = '00R';
@@ -24,14 +31,20 @@ SELECT lat FROM airports_parquet WHERE iata = '00R';
 DOUBLE
 ====
 ---- QUERY
+# Names without a catalog are resolved in the session catalog.
 SELECT * FROM functional_parquet.alltypes WHERE id = 3650
+---- CATCH
+Could not resolve table reference: 'functional_parquet.alltypes'
+====
+---- QUERY
+SELECT * FROM `default`.functional_parquet.alltypes WHERE id = 3650
 ---- RESULTS
 3650,true,0,0,0,0,0,0,'01/01/10','0',2010-01-01 00:00:00,2010,1
 ---- TYPES
 INT, BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE, STRING, STRING, TIMESTAMP, INT, INT
 ====
 ---- QUERY
-SELECT p_float, string_col from ice.iceberg_alltypes_part ice_alltypes INNER JOIN functional_parquet.alltypes alltypes ON alltypes.id = ice_alltypes.i
+SELECT p_float, string_col from ice.iceberg_alltypes_part ice_alltypes INNER JOIN `default`.functional_parquet.alltypes alltypes ON alltypes.id = ice_alltypes.i
 ---- RESULTS
 1.100000023841858,'2'
 1.100000023841858,'1'

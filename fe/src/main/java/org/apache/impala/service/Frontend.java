@@ -241,6 +241,7 @@ import org.apache.impala.thrift.TResultRow;
 import org.apache.impala.thrift.TResultSet;
 import org.apache.impala.thrift.TResultSetMetadata;
 import org.apache.impala.thrift.TRuntimeProfileNode;
+import org.apache.impala.thrift.TSessionState;
 import org.apache.impala.thrift.TShowFilesParams;
 import org.apache.impala.thrift.TShowStatsOp;
 import org.apache.impala.thrift.TSlotCountStrategy;
@@ -1347,7 +1348,7 @@ public class Frontend {
 
   /**
    * Like getTableNames(dbName, matcher, user, tableTypes) for the database 'dbName' of
-   * catalog 'catalogName' ('SHOW TABLES IN catalog.db'). If
+   * catalog 'catalogName' ('SHOW TABLES IN catalog.db', or the session catalog). If
    * 'catalogName' is null, 'dbName' is looked up in all catalogs. Returns an empty list
    * if the catalog doesn't exist.
    */
@@ -2225,6 +2226,7 @@ public class Frontend {
    */
   public TExecRequest createExecRequest(PlanCtx planCtx)
       throws ImpalaException {
+    setInitialCatalog(planCtx.getQueryContext().session);
     // Timeline of important events in the planning process, used for debugging
     // and profiling.
     try (FrontendProfile.Scope scope = FrontendProfile.createNewWithScope();
@@ -2424,30 +2426,42 @@ public class Frontend {
   }
 
   /**
+   * Sets the catalog of 'session' to the catalog that sessions start in if it has none
+   * yet (FeCatalog.getInitialCatalogName()). The backend does not know the catalogs, so
+   * it leaves the catalog unset until a USE statement sets it. The frontend then sees
+   * a session catalog in every request, see QualifiedDbName.fromSession().
+   */
+  public void setInitialCatalog(TSessionState session) throws ImpalaException {
+    if (!session.isSetCatalog() || session.getCatalog().isEmpty()) {
+      session.setCatalog(getCatalog().getInitialCatalogName());
+    }
+  }
+
+  /**
    * Collect required catalog objects for query planning of the statement and update
    * the request.
    */
   public static void collectRequiredObjects(TWaitForHmsEventRequest req,
-      StatementBase stmt, String sessionDbName) {
+      StatementBase stmt, QualifiedDbName sessionDb) {
     if (stmt instanceof ShowDbsStmt) {
       req.want_db_list = true;
       return;
     }
-    QualifiedDbName sessionDb = new QualifiedDbName(null, sessionDbName);
     // The statement hasn't been analyzed yet. We can only get the parsed db, i.e. the db
     // name written in the query string.
     String dbName = stmt.getParsedDb();
+    // A database without a catalog is a database of the session catalog.
     String catalog = stmt.getParsedCatalog();
+    if (catalog == null) catalog = sessionDb.getCatalog();
     // Use the session database if the db is not specified in SHOW TABLES/VIEWS/FUNCTIONS
     // statement.
     if (dbName == null &&
         (stmt instanceof ShowFunctionsStmt || stmt instanceof ShowTablesOrViewsStmt)) {
-      dbName = sessionDbName;
-      catalog = null;
+      dbName = sessionDb.getDb();
     }
     if (dbName != null) {
-      // Only the default catalog is synced with HMS events. Databases may be qualified
-      // with a catalog (SHOW TABLES IN catalog.db).
+      // Only the default catalog is synced with HMS events. Databases are qualified
+      // with a catalog (SHOW TABLES IN catalog.db, or the session catalog).
       if (!isDefaultCatalog(catalog)) return;
       TCatalogObject dbDesc = new TCatalogObject();
       dbDesc.setType(TCatalogObjectType.DATABASE);
@@ -2527,7 +2541,7 @@ public class Frontend {
     req.setTimeout_s(queryOptions.sync_hms_events_wait_time_s);
     req.setHeader(createCatalogServiceRequestHeader(
         TSessionStateUtil.getEffectiveUser(queryCtx.session), queryCtx));
-    collectRequiredObjects(req, stmt, queryCtx.session.database);
+    collectRequiredObjects(req, stmt, QualifiedDbName.fromSession(queryCtx.session));
     if (queryOptions.isSetDebug_action()) {
       req.setDebug_action(queryOptions.debug_action);
     }
@@ -3136,8 +3150,9 @@ public class Frontend {
         parseAndDoOtelTracing(compilerFactory, queryCtx, planCtx);
 
     User user = new User(TSessionStateUtil.getEffectiveUser(queryCtx.session));
-    StmtMetadataLoader metadataLoader = new StmtMetadataLoader(
-        this, queryCtx.session.database, timeline, user, queryCtx.getQuery_id());
+    StmtMetadataLoader metadataLoader = new StmtMetadataLoader(this,
+        QualifiedDbName.fromSession(queryCtx.session), timeline, user,
+        queryCtx.getQuery_id());
 
     //TODO (IMPALA-8788): should load table write ids in transaction context.
     StmtTableCache stmtTableCache = metadataLoader.loadTables(parsedStmt);

@@ -90,7 +90,15 @@ public abstract class ShowTablesOrViewsStmt extends StatementBase {
 
   @Override
   public void analyze(Analyzer analyzer) throws AnalysisException {
-    postAnalysisDb_ = (parsedDb_ == null ? analyzer.getSessionDb() : parsedDb_);
+    if (parsedDb_ == null) {
+      postAnalysisDb_ = analyzer.getSessionDb();
+    } else if (parsedDb_.getCatalog() == null) {
+      // A database without a catalog is a database of the session catalog.
+      postAnalysisDb_ =
+          new QualifiedDbName(analyzer.getSessionCatalog(), parsedDb_.getDb());
+    } else {
+      postAnalysisDb_ = parsedDb_;
+    }
     if (analyzer.getDb(postAnalysisDb_, Privilege.ANY) == null) {
       throw new AnalysisException(Analyzer.DB_DOES_NOT_EXIST_ERROR_MSG + postAnalysisDb_);
     }

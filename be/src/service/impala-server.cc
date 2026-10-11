@@ -2244,6 +2244,7 @@ void ImpalaServer::SessionState::ToThrift(const TUniqueId& session_id,
   state->session_id = session_id;
   state->session_type = session_type;
   state->database = database;
+  if (!catalog.empty()) state->__set_catalog(catalog);
   state->connected_user = connected_user;
   // The do_as_user will only be set if delegation is enabled and the
   // proxy user is authorized to delegate as this user.

@@ -31,6 +31,7 @@ import org.apache.impala.analysis.Analyzer;
 import org.apache.impala.analysis.ParsedStatement;
 import org.apache.impala.analysis.StmtMetadataLoader.StmtTableCache;
 import org.apache.impala.analysis.TableName;
+import org.apache.impala.analysis.QualifiedDbName;
 import org.apache.impala.authorization.AuthorizationContext;
 import org.apache.impala.authorization.AuthorizationFactory;
 import org.apache.impala.authorization.Privilege;
@@ -41,6 +42,7 @@ import org.apache.impala.calcite.type.ImpalaTypeCoercionFactory;
 import org.apache.impala.calcite.type.ImpalaTypeFactoryImpl;
 import org.apache.impala.calcite.util.SimplifiedAnalyzer;
 import org.apache.impala.calcite.validate.ImpalaConformance;
+import org.apache.impala.catalog.Catalog;
 import org.apache.impala.catalog.FeCatalog;
 import org.apache.impala.catalog.FeDb;
 import org.apache.impala.catalog.FeTable;
@@ -104,7 +106,7 @@ public class CalciteAnalysisDriver implements AnalysisDriver {
       }
 
       reader_ = CalciteMetadataHandler.createCalciteCatalogReader(stmtTableCache_,
-          queryCtx_, queryCtx_.session.database);
+          queryCtx_, QualifiedDbName.fromSession(queryCtx_.session));
       // When CalciteRelNodeConverter#convert() is called to convert the valid AST into a
       // logical plan, ViewTable#expandView() in Apache Calcite would be invoked if a
       // regular view is involved in the query. expandView() validates the SQL statement
@@ -209,7 +211,8 @@ public class CalciteAnalysisDriver implements AnalysisDriver {
         CalciteQueryParser queryParser = new CalciteQueryParser(sql);
         SqlNode parsedSqlNode = queryParser.parse();
         CalciteMetadataHandler.TableVisitor tableVisitor =
-            new CalciteMetadataHandler.TableVisitor(/* currentDb */ "default");
+            new CalciteMetadataHandler.TableVisitor(/* currentDb */
+                new QualifiedDbName(FeCatalog.DEFAULT_CATALOG, Catalog.DEFAULT_DB));
         parsedSqlNode.accept(tableVisitor);
 
         boolean childViewCreatedBySuperuser =

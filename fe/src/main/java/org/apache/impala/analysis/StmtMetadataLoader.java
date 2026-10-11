@@ -145,13 +145,19 @@ public class StmtMetadataLoader {
    * if no events should be marked. A null 'user' may be passed if don't need to resolve
    * column-masking/row-filtering policies.
    */
-  public StmtMetadataLoader(Frontend fe, String sessionDb, EventSequence timeline,
-      User user, TUniqueId queryId) {
+  public StmtMetadataLoader(Frontend fe, QualifiedDbName sessionDb,
+      EventSequence timeline, User user, TUniqueId queryId) {
     fe_ = Preconditions.checkNotNull(fe);
-    sessionDb_ = new QualifiedDbName(null, Preconditions.checkNotNull(sessionDb));
+    sessionDb_ = Preconditions.checkNotNull(sessionDb);
     timeline_ = timeline;
     user_ = user;
     queryId_ = queryId;
+  }
+
+  /** Constructor for a session database 'sessionDb' without a catalog. */
+  public StmtMetadataLoader(Frontend fe, String sessionDb, EventSequence timeline,
+      User user, TUniqueId queryId) {
+    this(fe, new QualifiedDbName(null, sessionDb), timeline, user, queryId);
   }
 
   /**
@@ -465,7 +471,7 @@ public class StmtMetadataLoader {
       loadedOrFailedTbls_.put(tblName, tbl);
       // The definition of a view and the masking policies of a table refer to tables of
       // the catalog of the view or table (the catalog it was referenced in, or no
-      // catalog). See Analyzer.setViewCatalog().
+      // catalog), not of the session catalog. See Analyzer.setViewCatalog().
       QualifiedDbName viewSessionDb = getViewSessionDb(tblName);
       if (tbl instanceof FeView) {
         viewTbls.addAll(
@@ -496,8 +502,8 @@ public class StmtMetadataLoader {
 
   /**
    * Returns the session database (see Analyzer.getSessionDb()) for the definition of
-   * the view or the masking policies of the table 'tblName': the session database
-   * qualified with the catalog of 'tblName'.
+   * the view or the masking policies of the table 'tblName': the session database with
+   * the catalog of 'tblName' instead of the session catalog.
    */
   private QualifiedDbName getViewSessionDb(TableName tblName) {
     return new QualifiedDbName(tblName.getCatalog(), sessionDb_.getDb());

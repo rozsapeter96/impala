@@ -524,6 +524,13 @@ public class FrontendTest extends FrontendTestBase {
         db, Arrays.asList("mydb"), Collections.emptyList());
     TestCollectRequiredObjectsHelper("SHOW TABLES IN other_catalog.mydb",
         db, Collections.emptyList(), Collections.emptyList());
+    // A session catalog other than 'default' is not synced with HMS events.
+    TestCollectRequiredObjectsHelper("SHOW TABLES",
+        "other_catalog.mydb", Collections.emptyList(), Collections.emptyList());
+    TestCollectRequiredObjectsHelper("SELECT * FROM foo",
+        "other_catalog.mydb", Collections.emptyList(), Collections.emptyList());
+    TestCollectRequiredObjectsHelper("SELECT * FROM foo",
+        "default.mydb", Arrays.asList("mydb"), Arrays.asList("mydb.foo"));
     TestCollectRequiredObjectsHelper("DESCRIBE HISTORY foo",
         db, Arrays.asList(db), Arrays.asList(db + ".foo"));
     TestCollectRequiredObjectsHelper("DESCRIBE HISTORY mydb.tbl",
@@ -563,7 +570,7 @@ public class FrontendTest extends FrontendTestBase {
       throws AnalysisException {
     StatementBase stmt = Parser.parse(query);
     TWaitForHmsEventRequest req = new TWaitForHmsEventRequest();
-    Frontend.collectRequiredObjects(req, stmt, sessionDb);
+    Frontend.collectRequiredObjects(req, stmt, TestUtils.parseQualifiedDb(sessionDb));
     if (expectedDbNames.isEmpty() && expectedTableNames.isEmpty()) {
       assertNull(req.object_descs);
       return;

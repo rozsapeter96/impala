@@ -77,3 +77,81 @@ COMPUTE STATS `rest-2`.berg.airports_parquet;
 ---- CATCH
 Table rest-2.berg.airports_parquet is in catalog 'rest-2'. This statement only supports tables of the 'default' catalog.
 ====
+---- QUERY
+# USE catalog.db sets the session catalog: names without a catalog are resolved in it.
+USE `rest-2`.berg;
+====
+---- QUERY
+SELECT lat FROM airports_parquet WHERE iata = '00R';
+---- RESULTS
+30.68586111
+---- TYPES
+DOUBLE
+====
+---- QUERY
+SELECT count(*) FROM berg.airports_parquet WHERE iata = '00R';
+---- RESULTS
+1
+---- TYPES
+BIGINT
+====
+---- QUERY
+SHOW TABLES;
+---- RESULTS: VERIFY_IS_SUBSET
+'airports_parquet'
+---- TYPES
+STRING
+====
+---- QUERY
+# The HMS database 'functional' is not in the session catalog.
+SELECT count(*) FROM functional.alltypestiny;
+---- CATCH
+Could not resolve table reference: 'functional.alltypestiny'
+====
+---- QUERY
+SELECT count(*) FROM `default`.functional.alltypestiny;
+---- RESULTS
+8
+---- TYPES
+BIGINT
+====
+---- QUERY
+SELECT count(*) FROM `rest-1`.ice.airports_parquet WHERE iata = '00M';
+---- RESULTS
+1
+---- TYPES
+BIGINT
+====
+---- QUERY
+DROP TABLE airports_parquet;
+---- CATCH
+Table airports_parquet is in catalog 'rest-2'. This statement only supports tables of the 'default' catalog.
+====
+---- QUERY
+USE `rest-1`.berg;
+---- CATCH
+Database does not exist: rest-1.berg
+====
+---- QUERY
+# USE db sets the database of the session catalog.
+USE functional;
+---- CATCH
+Database does not exist: rest-2.functional
+====
+---- QUERY
+USE `default`.functional;
+====
+---- QUERY
+SELECT count(*) FROM alltypestiny;
+---- RESULTS
+8
+---- TYPES
+BIGINT
+====
+---- QUERY
+SELECT count(*) FROM `rest-1`.ice.airports_parquet WHERE iata = '00M';
+---- RESULTS
+1
+---- TYPES
+BIGINT
+====

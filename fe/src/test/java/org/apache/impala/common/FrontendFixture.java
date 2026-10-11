@@ -34,6 +34,7 @@ import org.apache.impala.analysis.ParsedStatement;
 import org.apache.impala.analysis.ParsedStatementImpl;
 import org.apache.impala.analysis.ParseNode;
 import org.apache.impala.analysis.Parser;
+import org.apache.impala.analysis.QualifiedDbName;
 import org.apache.impala.analysis.QueryStmt;
 import org.apache.impala.analysis.StmtMetadataLoader;
 import org.apache.impala.analysis.StmtMetadataLoader.StmtTableCache;
@@ -313,6 +314,10 @@ public class FrontendFixture {
     return createAnalysisCtx(Catalog.DEFAULT_DB);
   }
 
+  /**
+   * Creates an analysis context for a session with the database 'defaultDb', given as
+   * 'db' or 'catalog.db' ('USE catalog.db'), see TestUtils.parseQualifiedDb().
+   */
   public AnalysisContext createAnalysisCtx(String defaultDb) {
     TQueryCtx queryCtx = TestUtils.createQueryContext(
         defaultDb, System.getProperty("user.name"));
@@ -378,8 +383,8 @@ public class FrontendFixture {
     CompilerFactory compilerFactory = new CompilerFactoryImpl();
     ParsedStatement parsedStmt = new ParsedStatementImpl(stmt, ctx.getQueryOptions());
     User user = new User(TSessionStateUtil.getEffectiveUser(ctx.getQueryCtx().session));
-    StmtMetadataLoader mdLoader = new StmtMetadataLoader(
-        frontend_, ctx.getQueryCtx().session.database, null, user, null);
+    StmtMetadataLoader mdLoader = new StmtMetadataLoader(frontend_,
+        QualifiedDbName.fromSession(ctx.getQueryCtx().session), null, user, null);
     StmtTableCache stmtTableCache = mdLoader.loadTables(parsedStmt);
     AnalysisResult analysisResult = ctx.analyzeAndAuthorize(compilerFactory, parsedStmt,
         stmtTableCache, frontend_.getAuthzChecker());

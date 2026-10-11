@@ -19,15 +19,18 @@ package org.apache.impala.analysis;
 
 import java.util.Objects;
 
+import org.apache.impala.catalog.FeCatalog;
+import org.apache.impala.thrift.TSessionState;
+
 import com.google.common.base.Preconditions;
 
 /**
  * A database name that is optionally qualified with a catalog: 'catalog.db' or 'db'.
  *
- * Used for the database of 'SHOW TABLES IN [catalog.]db' and for the session database
- * of an analyzer (Analyzer.getSessionDb()), which is qualified with the catalog of the
- * view whose definition is analyzed. A name without a catalog refers to the database of
- * that name in any catalog, see FeCatalog.getCatalogNames(). Immutable.
+ * Used for the session database ('USE [catalog.]db', see TSessionState.database and
+ * TSessionState.catalog) and for the database of 'SHOW TABLES IN [catalog.]db'. A name
+ * without a catalog refers to the database of that name in any catalog, see
+ * FeCatalog.getCatalogNames(); the session database always has a catalog. Immutable.
  */
 public class QualifiedDbName {
   // Null if the name is not qualified with a catalog.
@@ -41,21 +44,37 @@ public class QualifiedDbName {
     db_ = db;
   }
 
+  /**
+   * Returns the session database of 'session': TSessionState.database, qualified with
+   * the session catalog. The catalog is set by the frontend when it receives the
+   * session (Frontend.setInitialCatalog()); if it is not set, the default catalog.
+   */
+  public static QualifiedDbName fromSession(TSessionState session) {
+    String catalog = session.isSetCatalog() && !session.getCatalog().isEmpty() ?
+        session.getCatalog() : FeCatalog.DEFAULT_CATALOG;
+    return new QualifiedDbName(catalog, session.getDatabase());
+  }
+
   public String getCatalog() { return catalog_; }
   public String getDb() { return db_; }
 
   /**
    * Returns the name as SQL. The identifiers of catalog-qualified names are quoted
-   * where needed, a name without a catalog is returned as is.
+   * where needed, a name without a catalog is returned as is. Like TableName, the
+   * default catalog is not printed.
    */
   public String toSql() {
-    if (catalog_ == null) return db_;
+    if (!hasPrintedCatalog()) return db_;
     return ToSqlUtils.getIdentSql(catalog_) + "." + ToSqlUtils.getIdentSql(db_);
+  }
+
+  private boolean hasPrintedCatalog() {
+    return catalog_ != null && !catalog_.equalsIgnoreCase(FeCatalog.DEFAULT_CATALOG);
   }
 
   @Override
   public String toString() {
-    return catalog_ == null ? db_ : catalog_ + "." + db_;
+    return hasPrintedCatalog() ? catalog_ + "." + db_ : db_;
   }
 
   @Override

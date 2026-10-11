@@ -178,8 +178,7 @@ class TestIcebergRestCatalogWithHms(IcebergRestCatalogTests):
      catalogd_args=MULTICATALOG_CATALOGD_ARGS)
   @pytest.mark.execute_serially
   def test_rest_catalog_multicatalog(self, vector):
-    self.run_test_case('QueryTest/iceberg-multicatalog',
-                       vector, use_db="ice")
+    self.run_test_case('QueryTest/iceberg-multicatalog', vector)
     self.execute_query_expect_success(
         self.client, "insert into {} values (1)".format(WRITE_TEST_TABLE))
     result = self.execute_query_expect_success(
@@ -196,8 +195,7 @@ class TestIcebergRestCatalogWithHms(IcebergRestCatalogTests):
      catalogd_args=MULTICATALOG_CATALOGD_ARGS)
   @pytest.mark.execute_serially
   def test_multiple_rest_catalogs(self, vector):
-    self.run_test_case('QueryTest/iceberg-multiple-rest-catalogs',
-                       vector, use_db="ice")
+    self.run_test_case('QueryTest/iceberg-multiple-rest-catalogs', vector)
 
   @RestServerProperties(
     {'port': 9084},
@@ -209,8 +207,9 @@ class TestIcebergRestCatalogWithHms(IcebergRestCatalogTests):
      catalogd_args=MULTICATALOG_CATALOGD_ARGS)
   @pytest.mark.execute_serially
   def test_catalog_qualified_names(self, vector):
-    """Tables referenced with catalog-qualified names (catalog.db.tbl), with the HMS
-    ('default' catalog) and two REST catalogs."""
+    """Tables referenced with catalog-qualified names (catalog.db.tbl) and the session
+    catalog set by USE catalog.db, with the HMS ('default' catalog) and two REST
+    catalogs."""
     self.run_test_case('QueryTest/iceberg-catalog-qualified-names', vector,
         use_db="functional")
 
@@ -324,19 +323,24 @@ class TestIcebergRestCatalogDmlStandalone(IcebergRestCatalogTests):
      cluster_size=1)
   @pytest.mark.execute_serially
   def test_multiple_rest_catalogs_route_insert(self):
+    """The session starts in the first configured catalog ('rest-1'); tables of the
+    second catalog are referenced with catalog-qualified names."""
     self.execute_query_expect_success(
         self.client, "insert into {} values (1)".format(WRITE_TEST_TABLE))
     result = self.execute_query_expect_success(
         self.client, "select i from {}".format(WRITE_TEST_TABLE))
     assert result.data == ['1']
 
-    self.execute_query_expect_success(
+    secondary_table = "`rest-2`.{}".format(SECONDARY_WRITE_TEST_TABLE)
+    self.execute_query_expect_failure(
         self.client, "insert into {} values (2)".format(SECONDARY_WRITE_TEST_TABLE))
+    self.execute_query_expect_success(
+        self.client, "insert into {} values (2)".format(secondary_table))
     result = self.execute_query_expect_success(
-        self.client, "select i from {}".format(SECONDARY_WRITE_TEST_TABLE))
+        self.client, "select i from {}".format(secondary_table))
     assert result.data == ['2']
     assert self._snapshot_count(WRITE_TEST_TABLE) == 1
-    assert self._snapshot_count(SECONDARY_WRITE_TEST_TABLE) == 1
+    assert self._snapshot_count(secondary_table) == 1
 
   @RestServerProperties(
       {'port': 9084, 'catalog_location': WRITE_TEST_CATALOG_LOCATION,
@@ -350,12 +354,9 @@ class TestIcebergRestCatalogDmlStandalone(IcebergRestCatalogTests):
      cluster_size=1)
   @pytest.mark.execute_serially
   def test_catalog_qualified_insert(self):
-    """Both REST catalogs have a table with the same name, which is ambiguous without a
-    catalog. Catalog-qualified names pick the catalog."""
-    result = self.execute_query_expect_failure(
-        self.client, "select i from {}".format(WRITE_TEST_TABLE))
-    assert "Ambiguous table name" in str(result)
-
+    """Both REST catalogs have a table with the same name. A name without a catalog
+    refers to the session catalog, initially the first configured catalog ('rest-1');
+    catalog-qualified names and USE catalog.db pick the catalog."""
     rest1_table = "`rest-1`.{}".format(WRITE_TEST_TABLE)
     rest2_table = "`rest-2`.{}".format(WRITE_TEST_TABLE)
     self.execute_query_expect_success(
@@ -368,8 +369,24 @@ class TestIcebergRestCatalogDmlStandalone(IcebergRestCatalogTests):
     result = self.execute_query_expect_success(
         self.client, "select i from {}".format(rest2_table))
     assert result.data == ['2']
+    result = self.execute_query_expect_success(
+        self.client, "select i from {}".format(WRITE_TEST_TABLE))
+    assert result.data == ['1']
+
+    # Names without a catalog are resolved in the session catalog.
+    namespace, table = WRITE_TEST_TABLE.split('.', 1)
+    self.execute_query_expect_success(
+        self.client, "use `rest-2`.{}".format(namespace))
+    self.execute_query_expect_success(
+        self.client, "insert into {} values (3)".format(table))
+    result = self.execute_query_expect_success(
+        self.client, "select i from {} order by i".format(table))
+    assert result.data == ['2', '3']
+    result = self.execute_query_expect_success(
+        self.client, "select i from {}".format(rest1_table))
+    assert result.data == ['1']
     assert self._snapshot_count(rest1_table) == 1
-    assert self._snapshot_count(rest2_table) == 1
+    assert self._snapshot_count(rest2_table) == 2
 
   def _snapshot_count(self, table_name):
     result = self.execute_query_expect_success(

@@ -91,8 +91,7 @@ public class PathResolver {
       QualifiedDbName sessionDb) {
     Preconditions.checkArgument(path != null && !path.isEmpty());
     Preconditions.checkNotNull(sessionDb);
-    // In the definition of a view, 'sessionDb' has the catalog of the view and the
-    // candidates are in that catalog.
+    // With a session catalog ('USE catalog.db'), the candidates are in that catalog.
     String catalog = sessionDb.getCatalog();
     List<TableName> result = new ArrayList<>();
     int end = Math.min(2, path.size());
@@ -167,7 +166,7 @@ public class PathResolver {
    */
   public static TableName getFqTableName(TableName tableName, QualifiedDbName sessionDb) {
     if (tableName.getCatalog() != null) return tableName;
-    // In the definition of a view, 'sessionDb' has the catalog of the view.
+    // With a session catalog ('USE catalog.db'), names are qualified with it.
     String catalog = sessionDb.getCatalog();
     if (tableName.isFullyQualified()) {
       if (catalog == null) return tableName;
@@ -329,29 +328,31 @@ public class PathResolver {
   }
 
   /**
-   * Checks that the table names of 'stmt' that were not resolved as paths
-   * (StatementBase.getParsedTableNames()) are in the default catalog, unless the
-   * statement supports other catalogs. A name is in the catalog it is qualified with, or
-   * Must be
-   * called before the statement is analyzed, because statements that do not support
-   * other catalogs may look up their tables in the default catalog by database and
-   * table name.
+   * Checks that the tables that the parser recorded for 'stmt'
+   * (StatementBase.getParsedTableNames()) are in the initial catalog
+   * (FeCatalog.getInitialCatalogName(): the default catalog, the HMS, if there is one),
+   * unless the statement supports other catalogs. A name is in the catalog it is
+   * qualified with, or in the session catalog ('USE catalog.db') if it is not
+   * catalog-qualified. Must be called before the statement is analyzed, because
+   * statements that do not support other catalogs are executed by catalogd or look
+   * their tables up by database and table name, which only finds the tables of the
+   * initial catalog.
    */
   public static void checkParsedTableNameCatalogs(StatementBase stmt, Analyzer analyzer)
       throws AnalysisException {
     if (stmt.supportsNonDefaultCatalogs()) return;
+    String initialCatalog = analyzer.getCatalog().getInitialCatalogName();
     for (TableName tableName : stmt.getParsedTableNames()) {
       String catalog = tableName.getCatalog();
-      if (catalog == null || catalog.equalsIgnoreCase(FeCatalog.DEFAULT_CATALOG)) {
-        continue;
-      }
+      if (catalog == null) catalog = analyzer.getSessionCatalog();
+      if (catalog.equalsIgnoreCase(initialCatalog)) continue;
       if (!analyzer.getCatalog().getCatalogNames().contains(catalog.toLowerCase())) {
         throw new AnalysisException("Catalog does not exist: " + catalog);
       }
       throw new AnalysisException(String.format("Table %s is in catalog '%s'. This " +
           "statement only supports tables of the '%s' catalog. Tables of other " +
           "catalogs are supported in queries, DESCRIBE, SHOW TABLES and INSERT INTO.",
-          tableName, catalog, FeCatalog.DEFAULT_CATALOG));
+          tableName, catalog, initialCatalog));
     }
   }
 

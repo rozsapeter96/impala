@@ -1,6 +1,30 @@
 ====
 ---- QUERY
-select * from ice.iceberg_v2_positional_not_all_data_files_have_delete_files;
----- CATCH
-TException: Ambiguous table name
+# Both REST catalogs have this table. A name without a catalog refers to the session
+# catalog, which is initially the first configured catalog ('rest-1'), so it is not
+# ambiguous.
+SHOW TABLES IN ice LIKE 'iceberg_v2_positional_not_all_data_files_have_delete_files';
+---- RESULTS
+'iceberg_v2_positional_not_all_data_files_have_delete_files'
+---- TYPES
+STRING
+====
+---- QUERY
+SHOW TABLES IN `rest-2`.ice LIKE 'iceberg_v2_positional_not_all_data_files_have_delete_files';
+---- RESULTS
+'iceberg_v2_positional_not_all_data_files_have_delete_files'
+---- TYPES
+STRING
+====
+---- QUERY
+SELECT 1 FROM ice.iceberg_v2_positional_not_all_data_files_have_delete_files LIMIT 0;
+---- RESULTS
+---- TYPES
+TINYINT
+====
+---- QUERY
+SELECT 1 FROM `rest-2`.ice.iceberg_v2_positional_not_all_data_files_have_delete_files LIMIT 0;
+---- RESULTS
+---- TYPES
+TINYINT
 ====

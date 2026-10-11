@@ -3243,6 +3243,8 @@ values_operand_list ::=
 use_stmt ::=
   KW_USE ident_or_unreserved:db
   {: RESULT = new UseStmt(db); :}
+  | KW_USE ident_or_unreserved:catalog DOT ident_or_unreserved:db
+  {: RESULT = new UseStmt(catalog, db); :}
   ;
 
 show_tables_stmt ::=
